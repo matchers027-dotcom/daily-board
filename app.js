@@ -2,8 +2,8 @@
 // 本体の ID と鍵はページの URL のフラグメント(# の後ろ)にだけ置く。鍵とデプロイ ID は端末に保存しない。端末に残すのは本体が返した材料の最後の1回分だけ(apStorage_ の4関数。docs/plan-20261116-web-page-4.md)。
 // HTML の組み立ては render.js(純関数)。ここは通信・計測・ボタンの配線だけ。
 
-const AP_VERSION_ = 4;
-const AP_ACTIONS_ = ['view_page_data', 'view_page_answer', 'view_page_timing', 'view_page_ask', 'view_page_ask_photo', 'view_page_ask_status', 'view_page_ask_seen'];
+const AP_VERSION_ = 5;
+const AP_ACTIONS_ = ['view_page_data', 'view_page_answer', 'view_page_timing', 'view_page_ask', 'view_page_ask_photo', 'view_page_ask_status', 'view_page_ask_seen', 'view_page_followup'];
 const AP_TIMEOUT_MS_ = 25000;
 // 質問する欄(docs/plan-20261117-web-ask-3.md 4-2)。長辺 px と JPEG の画質の順(1枚 1,000,000 バイト以下になるまで)。
 const AP_ASK_PHOTO_TIMEOUT_MS_ = 120000;
@@ -186,6 +186,7 @@ function apOnData_(st, r, nowMs) {
   apShow_(html, st);
   st.t.p_render = apNow_();
   apWire_(st.mk);
+  apWireFollowups_(st.mk);
   apWireAsk_(st.mk, c.model);
   apStoreWrite_(c.model, nowMs);
   return { html: html, model: c.model };
@@ -222,6 +223,36 @@ function apWire_(mk) {
         }
         if (r.reason === 'stale_push') { show('新しい朝のメッセージがあります。開き直してください。'); return; }
         if (r.reason === 'busy' || r.retry) { show('混み合っています。もう一度押してください。'); return; }
+        show('記録できませんでした。');
+      });
+    });
+  });
+}
+
+// ボタン(一手の記録)。押下ごとの nonce は apHex_()。結果は同じ一手のボタンの aria-pressed に反映する。
+function apWireFollowups_(mk) {
+  const buttons = document.querySelectorAll('button[data-fu-push]');
+  Array.prototype.forEach.call(buttons, function (b) {
+    b.addEventListener('click', function () {
+      const pushId = b.getAttribute('data-fu-push');
+      const result = b.getAttribute('data-fu-result');
+      const card = b.parentNode ? b.parentNode.parentNode : null;
+      const out = card ? card.querySelector('.fu-out') : null;
+      const show = function (t) { if (out) out.textContent = t; };
+      show('送信中…');
+      apPost_(apEndpoint_(mk.m, 'view_page_followup'), { k: mk.k, push_id: pushId, result: result, nonce: apHex_() }).then(function (res) {
+        if (res.error) { show('通信に失敗しました。もう一度押してください。'); return; }
+        const r = res.status === 200 ? apParseJson_(res.text) : undefined;
+        if (!r || typeof r !== 'object') { show('記録できませんでした。'); return; }
+        if (r.ok === true) {
+          Array.prototype.forEach.call(buttons, function (x) {
+            if (x.getAttribute('data-fu-push') === pushId) x.setAttribute('aria-pressed', x === b ? 'true' : 'false');
+          });
+          show('記録しました。');
+          return;
+        }
+        if (r.outcome === 'too_old') { show('この一手はもう記録できません。'); return; }
+        if (r.outcome === 'busy') { show('混み合っています。もう一度押してください。'); return; }
         show('記録できませんでした。');
       });
     });

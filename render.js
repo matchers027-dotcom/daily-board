@@ -4,7 +4,7 @@
 // 関数名・定数名は _ で終える(GAS にそのまま写せる形。viewer/ の描画と同じ出力を目指す)。
 // モデル由来の文字列は必ず vrEsc_ を通す。色は種類の区別だけで、良し悪しでは塗らない。
 
-const VR_VERSION_ = 5;
+const VR_VERSION_ = 6;
 
 // 種類 -> 色のクラス(cls は文字と見出し・k はグラフの濃淡)・アイコン・名前。区分の無い・未知の値は VR_GROUP_OTHER_。
 const VR_GROUPS_ = {
@@ -195,6 +195,25 @@ function vrWake_(latest, noPress) {
     return '<div class="card wake">' + vrHead_({ cls: 'c-mind', icon: 'i-sun' }, '今朝の問い') + q + buttons + '</div>';
   }
   return '<details class="card ans"><summary>' + vrIcon_('i-check') + vrAnswerLine_(s.answer) + '</summary>' + q + buttons + '</details>';
+}
+
+// 3b. 一手の記録(coach.followups)。coach が無ければ何も出さない。ボタンの配線は app.js(apWireFollowups_)。
+function vrCoachFollowups_(model, noPress) {
+  const c = model && typeof model === 'object' && model.coach && typeof model.coach === 'object' ? model.coach : null;
+  if (c === null) return '';
+  const list = vrArr_(c.followups).filter(function (f) { return f && typeof f === 'object' && typeof f.push_id === 'string' && VR_PUSH_ID_PATTERN_.test(f.push_id); });
+  if (list.length === 0) return '';
+  const labels = vrArr_(c.labels).filter(function (l) { return l && typeof l === 'object' && typeof l.id === 'string' && typeof l.label === 'string' && l.label !== ''; });
+  const cards = list.map(function (f) {
+    const when = typeof f.when === 'string' && f.when !== '' ? '<p class="sub">' + vrEsc_(f.when) + '</p>' : '';
+    const rec = typeof f.result_label === 'string' && f.result_label !== '' ? '記録: ' + vrEsc_(f.result_label) : 'まだ記録がありません';
+    const buttons = noPress ? '' : '<div class="seg">' + labels.map(function (l) {
+      return '<button type="button" data-fu-push="' + vrEsc_(f.push_id) + '" data-fu-result="' + vrEsc_(l.id) + '" aria-pressed="'
+        + (f.result === l.id ? 'true' : 'false') + '">' + vrEsc_(l.label) + '</button>';
+    }).join('') + '</div><p class="fu-out" role="status"></p>';
+    return '<p class="fu-what">' + vrEsc_(f.date_label) + ' ' + vrEsc_(f.what) + '</p>' + when + '<p class="saved">' + rec + '</p>' + buttons;
+  }).join('');
+  return '<div class="card fu">' + vrHead_({ cls: 'c-mind', icon: 'i-check' }, '一手の記録') + cards + '</div>';
 }
 
 // 4. 本文(評価の文を抜いたもの)。3 でカードを出さず coda_text があれば、問いをここに出す。
@@ -388,7 +407,7 @@ function vrPage_(model, view) {
   const latest = m.latest && typeof m.latest === 'object' ? m.latest : null;
   const top = latest === null
     ? '<h1>今朝</h1><div class="card"><p>' + VR_TEXT_.empty + '</p></div>'
-    : vrDate_(latest, noPress) + vrSleep_(latest) + vrWake_(latest, noPress) + vrMsg_(latest, noPress) + (noPress ? '' : vrAsk_(latest, m.ask));
+    : vrDate_(latest, noPress) + vrSleep_(latest) + vrWake_(latest, noPress) + vrCoachFollowups_(m, noPress) + vrMsg_(latest, noPress) + (noPress ? '' : vrAsk_(latest, m.ask));
   return VR_SPRITE_ + '<div class="wrap">' + (stale ? vrStale_(m.now, stale) : '') + top + vrTiles_(latest, m.charts) + vrPast_(m.past) + vrNotes_(m) + vrClear_() + '</div>';
 }
 

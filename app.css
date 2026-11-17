@@ -34,6 +34,7 @@ small{font-size:13px;font-weight:600;color:var(--sub);margin-left:2px}
 .seg button[aria-pressed=true]{background:var(--card)}
 #result{font-size:13px;color:var(--sub);margin:8px 0 0}#result:empty{display:none}
 .saved{font-size:13px;color:var(--sub);margin:10px 4px}
+.fu .fu-what{font-size:16px;margin:8px 4px 0}.fu .sub,.fu .fu-out{font-size:13px;color:var(--sub);margin:4px 4px}
 details>summary{list-style:none;cursor:pointer}
 summary::-webkit-details-marker{display:none}
 .ans>summary,.pastwrap>summary{display:flex;align-items:center;gap:6px;font-size:15px;font-weight:600;min-height:28px}
