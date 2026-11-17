@@ -1,5 +1,5 @@
 :root{--bg:#F2F2F7;--card:#FFF;--text:#000;--sub:#6C6C70;--faint:#AEAEB2;--sep:rgba(60,60,67,.12);--fill:rgba(118,118,128,.12);--ok:#34C759;--sleep:#5E5CE6;--sleep2:#8F8DEE;--sleep3:#C7C6F6;--heart:#FF2D55;--act:#FF9500;--mind:#30B0C7;--avg:#8E8E93;--grid:rgba(60,60,67,.18)}
-@media (prefers-color-scheme:dark){:root{--bg:#000;--card:#1C1C1E;--text:#FFF;--sub:#98989F;--faint:#636366;--sep:rgba(84,84,88,.6);--fill:rgba(118,118,128,.24);--ok:#30D158;--sleep:#7D7AFF;--sleep2:#5B59C9;--sleep3:#3A397F;--heart:#FF375F;--act:#FF9F0A;--mind:#40CBE0;--avg:#8E8E93;--grid:rgba(84,84,88,.6)}.seg button[aria-pressed=true],.dz .ra:checked~.range .la,.dz .rb:checked~.range .lb{background:#636366}}
+@media (prefers-color-scheme:dark){:root{--bg:#000;--card:#1C1C1E;--text:#FFF;--sub:#98989F;--faint:#636366;--sep:rgba(84,84,88,.6);--fill:rgba(118,118,128,.24);--ok:#30D158;--sleep:#7D7AFF;--sleep2:#5B59C9;--sleep3:#3A397F;--heart:#FF375F;--act:#FF9F0A;--mind:#40CBE0;--avg:#8E8E93;--grid:rgba(84,84,88,.6)}.seg button[aria-pressed=true],.dz .ra:checked~.range .la,.dz .rb:checked~.range .lb,.dz .rc:checked~.range .lc{background:#636366}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;font-size:17px;line-height:1.6}
 .num{font-family:ui-rounded,system-ui,sans-serif;font-variant-numeric:tabular-nums}
@@ -59,10 +59,11 @@ details.tile[open]{grid-column:1/-1}
 .sp .sa{stroke:var(--avg);stroke-width:1;stroke-dasharray:2 2}
 .sp .se{fill:currentColor}
 .dz{margin-top:12px}
-.range{display:grid;grid-template-columns:1fr 1fr;background:var(--fill);border-radius:10px;padding:2px;margin:6px 0 14px}
+.range{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;background:var(--fill);border-radius:10px;padding:2px;margin:6px 0 14px}
 .range label{min-height:36px;display:flex;align-items:center;justify-content:center;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer}
 .dz .p7{display:none}.dz .ra:checked~.p7{display:block}.dz .ra:checked~.p28{display:none}
-.dz .ra:checked~.range .la,.dz .rb:checked~.range .lb{background:var(--card)}
+.dz .p90{display:none}.dz .rc:checked~.p90{display:block}.dz .rc:checked~.p28{display:none}
+.dz .ra:checked~.range .la,.dz .rb:checked~.range .lb,.dz .rc:checked~.range .lc{background:var(--card)}
 .ct{font-size:15px;font-weight:600;margin:0 0 2px}
 .when{font-size:13px;color:var(--sub);margin:0 0 10px}
 .none{font-size:13px;color:var(--sub)}

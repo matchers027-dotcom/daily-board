@@ -4,7 +4,7 @@
 // 関数名・定数名は _ で終える(GAS にそのまま写せる形。viewer/ の描画と同じ出力を目指す)。
 // モデル由来の文字列は必ず vrEsc_ を通す。色は種類の区別だけで、良し悪しでは塗らない。
 
-const VR_VERSION_ = 2;
+const VR_VERSION_ = 3;
 
 // 種類 -> 色のクラス(cls は文字と見出し・k はグラフの濃淡)・アイコン・名前。区分の無い・未知の値は VR_GROUP_OTHER_。
 const VR_GROUPS_ = {
@@ -232,10 +232,14 @@ function vrTile_(f, chart, n) {
   if (chart === null) return '<div class="tile flat">' + head + body + '</div>';
   const spark = vrSpark_(f.spark);
   const id = 'r' + n;
+  const long = chart.d90 && typeof chart.d90 === 'object' ? chart.d90 : null;
   return '<details class="tile"><summary>' + head + body + (spark !== '' ? '<span class="spk ' + info.cls + '">' + spark + '</span>' : '') + '</summary><div class="dz">'
     + '<input class="tin ra" type="radio" name="' + id + '" id="' + id + 'a"><input class="tin rb" type="radio" name="' + id + '" id="' + id + 'b" checked>'
-    + '<div class="range"><label class="la" for="' + id + 'a">7日</label><label class="lb" for="' + id + 'b">28日</label></div>'
-    + '<div class="p7">' + vrPanel_(chart.d7, f.name) + '</div><div class="p28">' + vrPanel_(chart.d28, f.name) + '</div></div></details>';
+    + (long !== null ? '<input class="tin rc" type="radio" name="' + id + '" id="' + id + 'c">' : '')
+    + '<div class="range"><label class="la" for="' + id + 'a">7日</label><label class="lb" for="' + id + 'b">28日</label>'
+    + (long !== null ? '<label class="lc" for="' + id + 'c">90日</label>' : '') + '</div>'
+    + '<div class="p7">' + vrPanel_(chart.d7, f.name) + '</div><div class="p28">' + vrPanel_(chart.d28, f.name) + '</div>'
+    + (long !== null ? '<div class="p90">' + vrPanel_(long, f.name) + '</div>' : '') + '</div></details>';
 }
 
 // 5. タイル(睡眠 → 回復 → 活動 → 区分なし)。sleep_bars と同じ名前のタイルはカードと重複するので出さない。
