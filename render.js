@@ -4,7 +4,7 @@
 // 関数名・定数名は _ で終える(GAS にそのまま写せる形。viewer/ の描画と同じ出力を目指す)。
 // モデル由来の文字列は必ず vrEsc_ を通す。色は種類の区別だけで、良し悪しでは塗らない。
 
-const VR_VERSION_ = 6;
+const VR_VERSION_ = 8;
 
 // 種類 -> 色のクラス(cls は文字と見出し・k はグラフの濃淡)・アイコン・名前。区分の無い・未知の値は VR_GROUP_OTHER_。
 const VR_GROUPS_ = {
@@ -216,6 +216,44 @@ function vrCoachFollowups_(model, noPress) {
   return '<div class="card fu">' + vrHead_({ cls: 'c-mind', icon: 'i-check' }, '一手の記録') + cards + '</div>';
 }
 
+// 3c. 目標(coach.goals / goal_choices / goal_max)。coach が無ければ何も出さない。保存の配線は app.js(apWireGoals_)。
+// 今の目標の文と「M月D日(曜)から」(since_label)。!noPress のときだけ goal_max 個の select(「なし」+ 選択肢)と保存ボタン。
+function vrCoachGoals_(model, noPress) {
+  const c = model && typeof model === 'object' && model.coach && typeof model.coach === 'object' ? model.coach : null;
+  if (c === null) return '';
+  const goals = vrArr_(c.goals).filter(function (g) { return g && typeof g === 'object' && typeof g.text === 'string' && g.text !== ''; });
+  const groups = vrArr_(c.goal_choices).filter(function (g) { return g && typeof g === 'object' && Array.isArray(g.choices); });
+  const max = vrNum_(c.goal_max);
+  const now = goals.length === 0 ? '<p class="saved">目標はまだ決めていません</p>' : goals.map(function (g) {
+    const since = typeof g.since_label === 'string' && g.since_label !== '' ? '<p class="sub">' + vrEsc_(g.since_label) + '</p>' : '';
+    return '<p class="goal-text">' + vrEsc_(g.text) + '</p>' + since;
+  }).join('');
+  let form = '';
+  if (!noPress && max !== null && max > 0 && groups.length > 0) {
+    let selects = '';
+    for (let i = 0; i < max; i++) {
+      const cur = goals[i] && typeof goals[i].code === 'string' ? goals[i].code : '';
+      selects += '<select data-goal-slot="' + i + '" aria-label="目標 ' + (i + 1) + '"><option value="">なし</option>' + groups.map(function (g) {
+        return '<optgroup label="' + vrEsc_(vrStr_(g.name)) + '">' + vrArr_(g.choices).filter(function (x) { return x && typeof x.code === 'string' && typeof x.text === 'string'; }).map(function (x) {
+          return '<option value="' + vrEsc_(x.code) + '"' + (x.code === cur ? ' selected' : '') + '>' + vrEsc_(x.text) + '</option>';
+        }).join('') + '</optgroup>';
+      }).join('') + '</select>';
+    }
+    form = '<div class="goal-form">' + selects + '<button type="button" data-goal-save="1">保存</button></div><p class="goal-out" id="goal-out" role="status"></p>';
+  }
+  return '<div class="card goal">' + vrHead_({ cls: 'c-mind', icon: 'i-check' }, '目標') + now + form
+    + '<p class="sub">目標は翌朝から使われます(5時より前に決めた目標はその朝から)。</p></div>';
+}
+
+// 3d. 週の振り返り(coach.weekly = { date_label, text })。無ければ何も出さない。過去の朝の前に畳んで置く。
+function vrCoachWeekly_(model) {
+  const c = model && typeof model === 'object' && model.coach && typeof model.coach === 'object' ? model.coach : null;
+  const w = c !== null && c.weekly && typeof c.weekly === 'object' ? c.weekly : null;
+  if (w === null || vrStr_(w.text) === '') return '';
+  const when = vrStr_(w.date_label).replace(/\([^()]*\)$/, '');
+  return '<details class="card pastwrap"><summary>週の振り返り' + (when !== '' ? '(' + vrEsc_(when) + ')' : '') + '</summary><div class="in">' + vrParas_(w.text, '') + '</div></details>';
+}
+
 // 4. 本文(評価の文を抜いたもの)。3 でカードを出さず coda_text があれば、問いをここに出す。
 function vrMsg_(latest, noPress) {
   const s = vrWakeState_(latest, noPress);
@@ -408,7 +446,8 @@ function vrPage_(model, view) {
   const top = latest === null
     ? '<h1>今朝</h1><div class="card"><p>' + VR_TEXT_.empty + '</p></div>'
     : vrDate_(latest, noPress) + vrSleep_(latest) + vrWake_(latest, noPress) + vrCoachFollowups_(m, noPress) + vrMsg_(latest, noPress) + (noPress ? '' : vrAsk_(latest, m.ask));
-  return VR_SPRITE_ + '<div class="wrap">' + (stale ? vrStale_(m.now, stale) : '') + top + vrTiles_(latest, m.charts) + vrPast_(m.past) + vrNotes_(m) + vrClear_() + '</div>';
+  const goals = vrCoachGoals_(m, noPress);
+  return VR_SPRITE_ + '<div class="wrap">' + (stale ? vrStale_(m.now, stale) : '') + top + goals + vrTiles_(latest, m.charts) + vrCoachWeekly_(m) + vrPast_(m.past) + vrNotes_(m) + vrClear_() + '</div>';
 }
 
 function vrError_(code) {
