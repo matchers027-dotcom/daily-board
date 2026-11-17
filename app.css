@@ -97,3 +97,12 @@ svg.plot{width:100%;height:auto;display:block;overflow:visible}
 .stale{font-size:13px;color:var(--sub);background:var(--fill);border-radius:10px;padding:8px 12px;margin:0 0 12px}
 .clr{text-align:center;margin:16px 0 0}
 .clr button{font:inherit;font-size:13px;color:var(--sub);background:transparent;border:1px solid var(--sep);border-radius:999px;min-height:40px;padding:0 16px}
+[hidden]{display:none}
+.ask textarea{display:block;width:100%;font:inherit;font-size:16px;color:var(--text);background:var(--fill);border:0;border-radius:10px;padding:10px 12px;margin:0 0 8px;resize:vertical}
+.ask p{margin:0 0 8px}
+.ask .hint{font-size:13px;color:var(--sub)}
+.ask .ans{white-space:pre-wrap;background:var(--fill);border-radius:10px;padding:10px 12px;margin:0 0 8px}
+.ask .ask-item{margin:0 0 12px}
+.ask .ask-q{font-size:15px;color:var(--sub);white-space:pre-wrap}
+.ask button{font:inherit;font-size:16px;font-weight:600;color:var(--text);background:var(--fill);border:0;border-radius:10px;min-height:44px;padding:0 20px}
+.ask button:disabled{opacity:.5}

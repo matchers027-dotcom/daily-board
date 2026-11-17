@@ -2,9 +2,19 @@
 // 本体の ID と鍵はページの URL のフラグメント(# の後ろ)にだけ置く。鍵とデプロイ ID は端末に保存しない。端末に残すのは本体が返した材料の最後の1回分だけ(apStorage_ の4関数。docs/plan-20261116-web-page-4.md)。
 // HTML の組み立ては render.js(純関数)。ここは通信・計測・ボタンの配線だけ。
 
-const AP_VERSION_ = 2;
-const AP_ACTIONS_ = ['view_page_data', 'view_page_answer', 'view_page_timing'];
+const AP_VERSION_ = 4;
+const AP_ACTIONS_ = ['view_page_data', 'view_page_answer', 'view_page_timing', 'view_page_ask', 'view_page_ask_photo', 'view_page_ask_status', 'view_page_ask_seen'];
 const AP_TIMEOUT_MS_ = 25000;
+// 質問する欄(docs/plan-20261117-web-ask-3.md 4-2)。長辺 px と JPEG の画質の順(1枚 1,000,000 バイト以下になるまで)。
+const AP_ASK_PHOTO_TIMEOUT_MS_ = 120000;
+const AP_ASK_STEPS_ = [[1568, 0.85], [1568, 0.7], [1280, 0.7], [1024, 0.6]];
+const AP_ASK_POLL_MS_ = 15000;
+const AP_ASK_POLL_SLOW_MS_ = 60000;
+const AP_ASK_POLL_FAST_FOR_MS_ = 900000;
+// 150分(安全弁の120分 + 受け皿 + 余裕)
+const AP_ASK_POLL_MAX_MS_ = 9000000;
+const AP_ASK_ITEMS_MAX_ = 5;
+const AP_ASK_SEEN_TRIES_ = 3;
 const AP_STORE_KEY_ = 'hlb_page_last';
 const AP_STORE_FORMAT_ = 1;
 const AP_STORE_MAX_AGE_MS_ = 604800000;
@@ -39,11 +49,11 @@ function apEndpoint_(m, action) {
   return 'https://script.google.com/macros/s/' + m + '/exec?action=' + action;
 }
 
-// { status, text, ms } か { error: 'net' | 'timeout' }
-function apPost_(url, obj) {
+// { status, text, ms } か { error: 'net' | 'timeout' }。timeoutMs を省くと AP_TIMEOUT_MS_(写真は AP_ASK_PHOTO_TIMEOUT_MS_)。
+function apPost_(url, obj, timeoutMs) {
   const t0 = Date.now();
   const ctl = new AbortController();
-  const timer = setTimeout(function () { ctl.abort(); }, AP_TIMEOUT_MS_);
+  const timer = setTimeout(function () { ctl.abort(); }, typeof timeoutMs === 'number' ? timeoutMs : AP_TIMEOUT_MS_);
   return fetch(url, {
     method: 'POST', body: JSON.stringify(obj), credentials: 'omit', cache: 'no-store',
     redirect: 'follow', referrerPolicy: 'no-referrer', signal: ctl.signal,
@@ -176,6 +186,7 @@ function apOnData_(st, r, nowMs) {
   apShow_(html, st);
   st.t.p_render = apNow_();
   apWire_(st.mk);
+  apWireAsk_(st.mk, c.model);
   apStoreWrite_(c.model, nowMs);
   return { html: html, model: c.model };
 }
@@ -214,6 +225,233 @@ function apWire_(mk) {
         show('記録できませんでした。');
       });
     });
+  });
+}
+
+// 長辺を edge 以下に・拡大しない・整数(純関数)。
+function apAskDims_(w, h, edge) {
+  const long = Math.max(w, h);
+  if (!(long > edge)) return { w: Math.max(1, Math.round(w)), h: Math.max(1, Math.round(h)) };
+  const k = edge / long;
+  return { w: Math.max(1, Math.round(w * k)), h: Math.max(1, Math.round(h * k)) };
+}
+
+function apAskB64_(blob) {
+  return blob.arrayBuffer().then(function (buf) {
+    const u8 = new Uint8Array(buf);
+    let bin = '';
+    for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+    return btoa(bin);
+  });
+}
+
+// { b64 } か { error: 'photo_unsupported' | 'photo_too_large' }。JPEG に描き直すので撮影情報(位置など)は送られない。
+// 画像の要素も blob: の URL も作らない(CSP の img-src 'self' のまま)。
+function apAskShrink_(file, maxBytes) {
+  if (typeof createImageBitmap !== 'function') return Promise.resolve({ error: 'photo_unsupported' });
+  const open = function () {
+    return createImageBitmap(file, { imageOrientation: 'from-image' }).catch(function (err) {
+      if (err instanceof TypeError) return createImageBitmap(file);
+      throw err;
+    });
+  };
+  return open().then(function (bitmap) {
+    const done = function (r) {
+      try { bitmap.close(); } catch (err) { /* 握る */ }
+      return r;
+    };
+    let i = 0;
+    const step = function () {
+      if (i >= AP_ASK_STEPS_.length) return Promise.resolve({ error: 'photo_too_large' });
+      const s = AP_ASK_STEPS_[i++];
+      const d = apAskDims_(bitmap.width, bitmap.height, s[0]);
+      const canvas = document.createElement('canvas');
+      canvas.width = d.w;
+      canvas.height = d.h;
+      const g = canvas.getContext('2d');
+      if (!g) return Promise.resolve({ error: 'photo_unsupported' });
+      g.drawImage(bitmap, 0, 0, d.w, d.h);
+      return new Promise(function (resolve) { canvas.toBlob(resolve, 'image/jpeg', s[1]); }).then(function (blob) {
+        if (!blob) return { error: 'photo_unsupported' };
+        if (blob.size <= maxBytes) return apAskB64_(blob).then(function (b64) { return { b64: b64 }; });
+        return step();
+      });
+    };
+    return step().then(done, function () { return done({ error: 'photo_unsupported' }); });
+  }, function () {
+    return { error: 'photo_unsupported' };
+  });
+}
+
+// 答えの問い合わせ(1件の枠ごと)。nonce が一致する答えだけが返る。質問・写真・答え・nonce は端末に保存しない。
+// 送ってから15分までは15秒おき・その後は60秒おき(150分で終える)。画面が見えない回は送らない。
+function apAskPoll_(mk, nonce, item) {
+  const t0 = Date.now();
+  const say = function (code, info) { item.st.textContent = vrAskMsg_(code, info); };
+  const delay = function () { return Date.now() - t0 < AP_ASK_POLL_FAST_FOR_MS_ ? AP_ASK_POLL_MS_ : AP_ASK_POLL_SLOW_MS_; };
+  let timer = null;
+  let inflight = false;
+  const again = function () {
+    if (item.stopped) return;
+    timer = setTimeout(tick, delay());
+  };
+  const tick = function () {
+    timer = null;
+    if (item.stopped) return;
+    if (Date.now() - t0 > AP_ASK_POLL_MAX_MS_) { item.stopped = true; say('poll_end'); return; }
+    if (document.visibilityState !== 'visible') { again(); return; }
+    if (inflight) return;
+    inflight = true;
+    apPost_(apEndpoint_(mk.m, 'view_page_ask_status'), { k: mk.k, nonce: nonce }).then(function (res) {
+      inflight = false;
+      if (item.stopped) return;
+      if (res.error) { again(); return; }
+      const r = res.status === 200 ? apParseJson_(res.text) : undefined;
+      if (!r || typeof r !== 'object' || r.ok !== true) { item.stopped = true; say('unknown'); return; }
+      if (r.state === 'answered' && r.answer && typeof r.answer === 'object') {
+        item.ans.textContent = r.answer.too_long === true || typeof r.answer.text !== 'string' ? vrAskMsg_('too_long') : r.answer.text;
+        item.ans.hidden = false;
+        if (r.answer.line !== null && r.answer.line !== undefined) { item.stopped = true; say('line_' + String(r.answer.line)); return; }
+        if (r.answer.seen === true) { item.stopped = true; say('seen'); return; }
+        if (document.visibilityState === 'visible') { item.stopped = true; apAskSeen_(mk, nonce, item, 0); return; }
+        again();
+        return;
+      }
+      if (r.state === 'waiting' || r.state === 'queued') { say(r.state); again(); return; }
+      item.stopped = true;
+      if (r.state === 'no_answer') { say('no_answer'); return; }
+      say('unknown');
+    });
+  };
+  // 画面が見えるようになったとき、すぐ1回走らせる
+  item.run = function () {
+    if (item.stopped || inflight) return;
+    if (timer !== null) { clearTimeout(timer); timer = null; }
+    tick();
+  };
+  timer = setTimeout(tick, AP_ASK_POLL_MS_);
+}
+
+// 画面が答えを表示したことを本体に知らせる(冪等)。届かなければ5秒後にもう一度(3回まで)。
+// 届かなくても、本体が3分後に LINE に送る(重複して届くのは受け入れる)。
+function apAskSeen_(mk, nonce, item, n) {
+  apPost_(apEndpoint_(mk.m, 'view_page_ask_seen'), { k: mk.k, nonce: nonce }).then(function (res) {
+    const r = !res.error && res.status === 200 ? apParseJson_(res.text) : undefined;
+    if (r && typeof r === 'object' && r.ok === true && r.state === 'seen') { item.st.textContent = vrAskMsg_('seen'); return; }
+    if (r && typeof r === 'object' && r.ok === true && r.state === 'line') { item.st.textContent = vrAskMsg_('line_' + String(r.line)); return; }
+    if (n + 1 < AP_ASK_SEEN_TRIES_) setTimeout(function () { apAskSeen_(mk, nonce, item, n + 1); }, 5000);
+  });
+}
+
+// いま配線している質問欄(visibilitychange のリスナーは1つだけ。最後に配線したものを見る)。
+let apAskUi_ = null;
+let apAskVisBound_ = false;
+
+// 質問する欄の配線(#ask-send が無ければ何もしない)。
+function apWireAsk_(mk, model) {
+  const btn = document.getElementById('ask-send');
+  if (!btn) return;
+  const ask = model && model.ask && typeof model.ask === 'object' ? model.ask : {};
+  const num = function (v, d) { return typeof v === 'number' && Number.isFinite(v) ? v : d; };
+  const textMax = num(ask.text_max, 1000);
+  const noteMax = num(ask.note_max, 100);
+  const photoMax = num(ask.photo_max, 4);
+  const photoBytes = num(ask.photo_bytes, 1000000);
+  const textEl = document.getElementById('ask-text');
+  const photoEl = document.getElementById('ask-photo');
+  const list = document.getElementById('ask-list');
+  const ui = { status: document.getElementById('ask-status'), list: list, items: [] };
+  const pushId = model && model.latest && typeof model.latest.push_id === 'string' ? model.latest.push_id : '';
+  const memo = { sig: '', nonce: '' };
+  const say = function (code, info) { ui.status.textContent = vrAskMsg_(code, info); };
+  apAskUi_ = ui;
+  if (!apAskVisBound_) {
+    apAskVisBound_ = true;
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState !== 'visible' || apAskUi_ === null) return;
+      apAskUi_.items.forEach(function (it) { if (typeof it.run === 'function') it.run(); });
+    });
+  }
+
+  // 送れた質問の枠を #ask-list の末尾に1件作る(textContent だけ)。5件を超えたら最も古い枠を外して問い合わせを止める。
+  const makeItem = function (label) {
+    const wrap = document.createElement('div');
+    wrap.className = 'ask-item';
+    const q = document.createElement('p');
+    q.className = 'ask-q';
+    q.textContent = label;
+    const st = document.createElement('p');
+    st.className = 'ask-st';
+    st.setAttribute('role', 'status');
+    const ans = document.createElement('div');
+    ans.className = 'ans';
+    ans.hidden = true;
+    wrap.appendChild(q);
+    wrap.appendChild(st);
+    wrap.appendChild(ans);
+    if (list) list.appendChild(wrap);
+    const item = { wrap: wrap, st: st, ans: ans, stopped: false, run: null };
+    ui.items.push(item);
+    while (ui.items.length > AP_ASK_ITEMS_MAX_) {
+      const old = ui.items.shift();
+      old.stopped = true;
+      if (old.wrap.parentNode) old.wrap.parentNode.removeChild(old.wrap);
+    }
+    return item;
+  };
+
+  const finish = function (res, nonce, label) {
+    btn.disabled = false;
+    if (res.error) { say(res.error); return; }
+    const r = res.status === 200 ? apParseJson_(res.text) : undefined;
+    if (!r || typeof r !== 'object') { say('other'); return; }
+    if (r.ok === true) {
+      textEl.value = '';
+      if (photoEl) photoEl.value = '';
+      memo.sig = '';
+      memo.nonce = '';
+      say('');
+      const item = makeItem(label);
+      item.st.textContent = vrAskMsg_(r.queued === true ? 'queued' : 'waiting');
+      apAskPoll_(mk, nonce, item);
+      return;
+    }
+    if (r.reason === 'wake_failed') { memo.sig = ''; memo.nonce = ''; }
+    say(typeof r.reason === 'string' ? r.reason : 'other');
+  };
+
+  btn.addEventListener('click', function () {
+    const text = textEl.value;
+    const files = photoEl && photoEl.files ? Array.prototype.slice.call(photoEl.files) : [];
+    if (files.length > photoMax) { say('photo_too_many'); return; }
+    if (files.length > 0 && text.length > noteMax) { say('note_too_long'); return; }
+    if (files.length === 0 && text.trim() === '') { say('empty'); return; }
+    if (text.length > textMax) { say('too_long_text'); return; }
+    const sig = JSON.stringify([text, files.map(function (f) { return [f.name, f.size, f.lastModified]; })]);
+    if (memo.nonce === '' || sig !== memo.sig) { memo.nonce = apHex_(); memo.sig = sig; }
+    const nonce = memo.nonce;
+    const label = files.length === 0 ? text.trim() : '写真' + files.length + '枚' + (text.trim() === '' ? '' : '(' + text.trim() + ')');
+    btn.disabled = true;
+    if (files.length === 0) {
+      say('sending');
+      apPost_(apEndpoint_(mk.m, 'view_page_ask'), { k: mk.k, nonce: nonce, push_id: pushId, text: text }).then(function (res) { finish(res, nonce, label); });
+      return;
+    }
+    say('shrinking');
+    const out = [];
+    const next = function (i) {
+      if (i >= files.length) {
+        say('sending');
+        apPost_(apEndpoint_(mk.m, 'view_page_ask_photo'), { k: mk.k, nonce: nonce, text: text, photos: out }, AP_ASK_PHOTO_TIMEOUT_MS_).then(function (res) { finish(res, nonce, label); });
+        return;
+      }
+      apAskShrink_(files[i], photoBytes).then(function (r) {
+        if (r.error) { btn.disabled = false; say(r.error); return; }
+        out.push(r.b64);
+        next(i + 1);
+      });
+    };
+    next(0);
   });
 }
 

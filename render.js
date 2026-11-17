@@ -4,7 +4,7 @@
 // 関数名・定数名は _ で終える(GAS にそのまま写せる形。viewer/ の描画と同じ出力を目指す)。
 // モデル由来の文字列は必ず vrEsc_ を通す。色は種類の区別だけで、良し悪しでは塗らない。
 
-const VR_VERSION_ = 3;
+const VR_VERSION_ = 5;
 
 // 種類 -> 色のクラス(cls は文字と見出し・k はグラフの濃淡)・アイコン・名前。区分の無い・未知の値は VR_GROUP_OTHER_。
 const VR_GROUPS_ = {
@@ -24,6 +24,38 @@ const VR_TEXT_ = {
   cleared: 'この端末に残した記録を消しました。次に開くと本体から読み直し、また最後の1回分だけ残します。',
   stale_prev: '前回の記録',
 };
+// 質問する欄の文(docs/plan-20261117-web-ask-3.md 4-1)。waiting の {until} は vrAskMsg_ が差し込む。
+const VR_ASK_TEXT_ = {
+  sending: '送信中…',
+  shrinking: '写真を縮めて送っています…',
+  waiting: '受け取りました。お返事を書いています。お返事はこの画面に出ます(できてから3分ほどこの画面で見ていないときは LINE に届きます)。',
+  queued: '受け取りました。前のお返事の後に書きます。お返事はこの画面に出ます(できてから3分ほどこの画面で見ていないときは LINE に届きます)。',
+  seen: 'この画面でお返事を表示しました。LINE には送りません。',
+  line_push: 'このお返事は LINE にも送りました。',
+  line_push_floor: 'このお返事は LINE にも送りました。',
+  line_queued: '今月は LINE で送れる数が残り少ないため、LINE には次の朝のメッセージと一緒に届きます。',
+  line_dropped: 'LINE には送れませんでした。',
+  line_failed: 'LINE には送れませんでした。',
+  too_long: 'お返事が長いため画面には出せません。LINE をご確認ください。',
+  no_answer: 'お返事を作れませんでした。少し時間をおいて、もう一度送ってください。',
+  unknown: '状況を確かめられませんでした。お返事は LINE に届きます。',
+  poll_end: '確認を終えました。お返事は LINE に届きます。',
+  busy: 'いまは順番を待っている質問が多いため、受け付けられませんでした。少し待ってから送ってください。',
+  day_limit: '今日はこれ以上、質問を受け付けられません。明日また送ってください。',
+  off: '今は画面から質問できません。LINE で送ってください。',
+  photo_off: '今は画面から質問できません。LINE で送ってください。',
+  stale_push: '新しい朝のメッセージがあります。開き直してください。',
+  wake_failed: '質問は記録しましたが、いまはお返事を作れません。少し時間をおいて送り直すか、LINE で送ってください。',
+  empty: '質問を入力してください。',
+  too_long_text: '1,000字までにしてください。',
+  note_too_long: '写真に添える一言は100字までにしてください。',
+  photo_too_many: '写真は4枚までです。',
+  photo_too_large: '写真を小さくできませんでした。LINE で送ってください。',
+  photo_unsupported: 'この端末では画面から写真を送れません。LINE で送ってください。',
+  net: '通信に失敗しました。もう一度送ってください。',
+  timeout: '通信に失敗しました。もう一度送ってください。',
+};
+const VR_ASK_TEXT_OTHER_ = '送れませんでした。';
 const VR_ERROR_CODES_ = ['url', 'net', 'timeout', 'gate', 'http', 'json', 'server', 'version'];
 const VR_PUSH_ID_PATTERN_ = /^[A-Za-z0-9-]{1,80}$/;
 
@@ -53,6 +85,14 @@ function vrEsc_(s) {
   return String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g, function (c) {
     return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
   });
+}
+
+function vrAskMsg_(code, info) {
+  if (typeof code !== 'string' || !Object.prototype.hasOwnProperty.call(VR_ASK_TEXT_, code)) return VR_ASK_TEXT_OTHER_;
+  const t = VR_ASK_TEXT_[code];
+  if (code !== 'waiting') return t;
+  const until = info && typeof info === 'object' && typeof info.until === 'string' && /^\d{1,2}:\d{2}$/.test(info.until) ? info.until : '';
+  return until !== '' ? t.replace('{until}', until) : t.replace('({until}ごろまで)', '');
 }
 
 function vrNum_(v) {
@@ -163,6 +203,26 @@ function vrMsg_(latest, noPress) {
   const coda = vrStr_(latest.coda_text);
   return '<div class="card msg">' + vrHead_({ cls: 'c-neu', icon: 'i-chat' }, latest.is_today === true && !noPress ? '今朝のメッセージ' : '直近の朝のメッセージ')
     + vrParas_(latest.body_rest, '') + (!s.canPress && coda !== '' ? '<p class="coda">' + vrEsc_(coda) + '</p>' : '') + '</div>';
+}
+
+// 5. 質問する欄。ask.on が true で push_id が読めるときだけ。入力欄・ボタンの配線は app.js(apWireAsk_)。
+function vrAsk_(latest, ask) {
+  if (!ask || typeof ask !== 'object' || ask.on !== true) return '';
+  if (!latest || typeof latest !== 'object' || typeof latest.push_id !== 'string' || !VR_PUSH_ID_PATTERN_.test(latest.push_id)) return '';
+  const pick = function (v, d) { const n = vrNum_(v); return n === null ? d : n; };
+  const textMax = pick(ask.text_max, 1000);
+  const noteMax = pick(ask.note_max, 100);
+  const photoMax = pick(ask.photo_max, 4);
+  const photo = ask.photo === true
+    ? '<p><input type="file" id="ask-photo" accept="image/*" multiple></p><p class="hint">写真は' + vrEsc_(photoMax) + '枚まで。添える一言は' + vrEsc_(noteMax) + '字まで。</p>'
+    : '';
+  return '<div class="card ask">' + vrHead_({ cls: 'c-neu', icon: 'i-chat' }, '質問する')
+    + '<textarea id="ask-text" maxlength="' + vrEsc_(textMax) + '" rows="3" aria-label="質問"></textarea>'
+    + photo
+    + '<p><button type="button" id="ask-send">送る</button></p>'
+    + '<p id="ask-status" role="status"></p><div id="ask-list"></div>'
+    + '<p class="hint">お返事はこの画面に出ます。できてから3分ほどこの画面で見ていないときは LINE に届きます。</p>'
+    + (vrNum_(ask.today) !== null ? '<p class="hint">今日、画面から受け付けた質問: ' + vrEsc_(ask.today) + '件</p>' : '') + '</div>';
 }
 
 // 小さな推移(28日の値。null で線を切る)。
@@ -328,7 +388,7 @@ function vrPage_(model, view) {
   const latest = m.latest && typeof m.latest === 'object' ? m.latest : null;
   const top = latest === null
     ? '<h1>今朝</h1><div class="card"><p>' + VR_TEXT_.empty + '</p></div>'
-    : vrDate_(latest, noPress) + vrSleep_(latest) + vrWake_(latest, noPress) + vrMsg_(latest, noPress);
+    : vrDate_(latest, noPress) + vrSleep_(latest) + vrWake_(latest, noPress) + vrMsg_(latest, noPress) + (noPress ? '' : vrAsk_(latest, m.ask));
   return VR_SPRITE_ + '<div class="wrap">' + (stale ? vrStale_(m.now, stale) : '') + top + vrTiles_(latest, m.charts) + vrPast_(m.past) + vrNotes_(m) + vrClear_() + '</div>';
 }
 
