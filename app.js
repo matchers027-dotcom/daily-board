@@ -2,7 +2,7 @@
 // 本体の ID と鍵はページの URL のフラグメント(# の後ろ)にだけ置く。鍵とデプロイ ID は端末に保存しない。端末に残すのは本体が返した材料の最後の1回分だけ(apStorage_ の4関数。docs/plan-20261116-web-page-4.md)。
 // HTML の組み立ては render.js(純関数)。ここは通信・計測・ボタンの配線だけ。
 
-const AP_VERSION_ = 7;
+const AP_VERSION_ = 8;
 const AP_ACTIONS_ = ['view_page_data', 'view_page_answer', 'view_page_timing', 'view_page_ask', 'view_page_ask_photo', 'view_page_ask_status', 'view_page_ask_seen', 'view_page_followup', 'view_page_goals', 'view_page_ask_history'];
 const AP_TIMEOUT_MS_ = 25000;
 // 質問する欄(docs/plan-20261117-web-ask-3.md 4-2)。長辺 px と JPEG の画質の順(1枚 1,000,000 バイト以下になるまで)。
@@ -182,11 +182,39 @@ function apWireGotos_(st) {
   });
 }
 
+// グラフの列を押す(もう一度で戻す)。文は vrTipText_ が選ぶ。
+function apTipOn_(st, el) {
+  const hit = el && el.closest ? el.closest('rect.hit') : null;
+  const pane = hit ? hit.closest('[data-r]') : null;
+  const box = hit ? hit.closest('.chart') : null;
+  const model = st.model ? st.model : st.stale;
+  if (!pane || !box || !model || !Array.isArray(model.charts)) return;
+  const rk = pane.getAttribute('data-r');
+  const id = typeof box.id === 'string' ? box.id.replace(/^ch-/, '') : '';
+  const entry = model.charts.filter(function (c) { return c && c.id === id; })[0];
+  const chart = entry && /^d(7|28|90)$/.test(rk) ? entry[rk] : null;
+  const tip = pane.querySelector('.tip');
+  if (!chart || typeof chart !== 'object' || !tip) return;
+  const wasOn = hit.classList.contains('on');
+  const prev = pane.querySelector('rect.hit.on');
+  if (prev) prev.classList.remove('on');
+  if (!wasOn) hit.classList.add('on');
+  tip.textContent = vrTipText_(chart, wasOn ? null : Number(hit.getAttribute('data-i')));
+}
+
+// #tab-trend の click を1つだけ受ける(委譲)。
+function apWireTips_(st) {
+  const tab = document.getElementById('tab-trend');
+  if (!tab || typeof tab.addEventListener !== 'function') return;
+  tab.addEventListener('click', function (ev) { apTipOn_(st, ev.target); });
+}
+
 function apWireTabs_(st) {
   Array.prototype.forEach.call(document.querySelectorAll('[data-tab]'), function (b) {
     b.addEventListener('click', function () { apTab_(st, b.getAttribute('data-tab')); });
   });
   apWireGotos_(st);
+  apWireTips_(st);
 }
 
 function apWireClear_(st) {

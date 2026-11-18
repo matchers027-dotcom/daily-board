@@ -75,6 +75,7 @@ svg.plot{width:100%;height:auto;display:block;overflow:visible}
 .gr path{stroke:var(--grid);stroke-width:1}
 .tx{font-size:12px;fill:var(--sub)}.m{text-anchor:middle}
 .pb{fill:none;stroke:var(--c1)}
+.cb{fill:var(--c1)}.cz{fill:none;stroke:var(--c1);stroke-width:2}
 .s0{fill:var(--c1)}.s1{fill:var(--c2)}.s2{fill:var(--c3)}
 .pt{fill:var(--c1)}.pl{stroke:var(--card);stroke-width:2}
 .f{opacity:.45}
@@ -112,3 +113,9 @@ svg.plot{width:100%;height:auto;display:block;overflow:visible}
 .ask button{font:inherit;font-size:16px;font-weight:600;color:var(--text);background:var(--fill);border:0;border-radius:10px;min-height:44px;padding:0 20px}
 .ask button:disabled{opacity:.5}
 .goal .goal-text{font-size:16px;margin:8px 4px 0}.goal .sub,.goal .goal-out{font-size:13px;color:var(--sub);margin:4px 4px}.goal .goal-form{display:flex;flex-direction:column;gap:8px;margin:8px 4px}.goal select{font:inherit;font-size:16px;color:var(--text);background:var(--fill);border:0;border-radius:10px;min-height:44px;padding:0 12px;width:100%}.goal button{font:inherit;font-size:16px;font-weight:600;color:var(--text);background:var(--fill);border:0;border-radius:10px;min-height:44px;padding:0 20px}
+.yt{font-size:12px;fill:var(--text);text-anchor:end}.yu{font-size:11px;fill:var(--sub);text-anchor:end}
+.ln{fill:none;stroke:var(--c1);stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}.mk{fill:var(--c1)}
+.al{font-size:11px;fill:var(--avg);text-anchor:end}.al text,.il text{paint-order:stroke;stroke:var(--card);stroke-width:3px;stroke-linejoin:round}.il{font-size:11px;fill:var(--text)}
+.hit{fill:transparent;pointer-events:all;cursor:pointer}.hit.on{fill:var(--fill)}
+.rng{list-style:none;margin:8px 0 0;padding:0;font-size:13px;color:var(--text)}.rng li{margin:2px 0}
+.ea{text-anchor:end}

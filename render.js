@@ -1,10 +1,10 @@
 // render.js — 1枚の静的ページの描画(純関数だけ。docs/plan-20261116-web-page-3.md 2章)。
 // 本体の材料 v3(webViewPageModel_)を受け取り、HTML と SVG の文字列を返す。DOM・通信・端末の保存・時計には触れない。
 // 値・目盛り・平均・日付の文字列は本体が作ったものを写すだけで、ここでは座標の計算だけをする。
-// 関数名・定数名は _ で終える(GAS にそのまま写せる形。viewer/ の描画と同じ出力を目指す)。
+// 関数名・定数名は _ で終える(GAS にそのまま写せる形。グラフは P2 から viewer/ と別の描画)。
 // モデル由来の文字列は必ず vrEsc_ を通す。色は種類の区別だけで、良し悪しでは塗らない。
 
-const VR_VERSION_ = 9;
+const VR_VERSION_ = 11;
 
 // 種類 -> 色のクラス(cls は文字と見出し・k はグラフの濃淡)・アイコン・名前。区分の無い・未知の値は VR_GROUP_OTHER_。
 const VR_GROUPS_ = {
@@ -69,10 +69,10 @@ const VR_PUSH_ID_PATTERN_ = /^[A-Za-z0-9-]{1,80}$/;
 
 const VR_SVG_WIDTH_ = 340;
 const VR_SVG_PLOT_HEIGHT_ = 150;
-const VR_SVG_LEFT_ = 4;
-const VR_SVG_AXIS_WIDTH_ = 44;
-const VR_SVG_TOP_ = 10;
-const VR_SVG_DATE_ROW_ = 24;
+const VR_SVG_YAXIS_W_ = 66;
+const VR_SVG_RIGHT_ = 6;
+const VR_SVG_TOP_ = 22;
+const VR_SVG_DATE_ROW_ = 38;
 
 // 小さな推移(タイルの中)。
 const VR_SPARK_W_ = 120;
@@ -344,6 +344,17 @@ function vrSpark_(sp) {
     + '<path class="sl" d="' + d + '"/><circle class="se" cx="' + last.x + '" cy="' + last.y + '" r="2.5"/></svg>';
 }
 
+// グラフの上の1行の文字(エスケープしない生の文字列。HTML にするときは呼び出し側が vrEsc_ を通す)。
+// i が null / undefined か、tips に同じ i が無ければ今の行(when か sub ・ headline)。あれば「日付 ・ 値」。
+function vrTipText_(chart, i) {
+  if (!chart || typeof chart !== 'object') return '';
+  const hasValues = Array.isArray(chart.legend_values) && chart.legend_values.length > 0;
+  const base = vrStr_(hasValues ? chart.when : chart.sub) + ' ・ ' + vrStr_(chart.headline);
+  if (i === null || i === undefined) return base;
+  const hit = vrArr_(chart.tips).filter(function (t) { return t && typeof t === 'object' && t.i === i; })[0];
+  return hit === undefined ? base : vrStr_(hit.date) + ' ・ ' + vrStr_(hit.text);
+}
+
 // 開いたときのグラフ1枚(7日か28日)。注記と時点はここに出さない(最下部に1回)。
 function vrPanel_(chart, tileName) {
   if (!chart || typeof chart !== 'object') return '<p class="none">' + VR_TEXT_.none + '</p>';
@@ -359,10 +370,12 @@ function vrPanel_(chart, tileName) {
   vrArr_(chart.avgs).forEach(function (a) {
     if (a && typeof a === 'object') keys.push('<span><i class="ka"></i>' + vrEsc_(a.text) + '</span>');
   });
+  const rangeLines = chart.range && typeof chart.range === 'object' ? vrArr_(chart.range.lines).filter(function (l) { return typeof l === 'string' && l !== ''; }) : [];
+  const rng = rangeLines.length > 0 ? '<ul class="rng">' + rangeLines.map(function (l) { return '<li>' + vrEsc_(l) + '</li>'; }).join('') + '</ul>' : '';
   return '<div class="pnl ' + info.k + '">'
     + (chart.title !== tileName ? '<p class="ct">' + vrEsc_(chart.title) + '</p>' : '')
-    + '<p class="when">' + vrEsc_(hasValues ? chart.when : chart.sub) + ' ・ ' + vrEsc_(chart.headline) + '</p>'
-    + vrSvg_(chart) + (keys.length > 0 ? '<div class="keys">' + keys.join('') + '</div>' : '') + '</div>';
+    + '<p class="when tip" aria-live="polite">' + vrEsc_(vrTipText_(chart, null)) + '</p>'
+    + vrSvg_(chart) + rng + (keys.length > 0 ? '<div class="keys">' + keys.join('') + '</div>' : '') + '</div>';
 }
 
 // タイル1枚(平たい。グラフと小さな線は出さない)。グラフのある指標(chart が c + 数字)は押すと推移のタブのそのグラフへ。
@@ -479,8 +492,8 @@ function vrTabTrend_(m) {
     + '<div class="range"><label class="la" for="rg7">7日</label><label class="lb" for="rg28">28日</label>'
     + (has90 ? '<label class="lc" for="rg90">90日</label>' : '') + '</div><div class="charts">'
     + charts.map(function (c) {
-      return '<div class="chart" id="ch-' + c.id + '"><div class="p7">' + vrPanel_(c.d7, '') + '</div><div class="p28">' + vrPanel_(c.d28, '') + '</div>'
-        + (has90 ? '<div class="p90">' + vrPanel_(c.d90 && typeof c.d90 === 'object' ? c.d90 : null, '') + '</div>' : '') + '</div>';
+      return '<div class="chart" id="ch-' + c.id + '"><div class="p7" data-r="d7">' + vrPanel_(c.d7, '') + '</div><div class="p28" data-r="d28">' + vrPanel_(c.d28, '') + '</div>'
+        + (has90 ? '<div class="p90" data-r="d90">' + vrPanel_(c.d90 && typeof c.d90 === 'object' ? c.d90 : null, '') + '</div>' : '') + '</div>';
     }).join('') + '</div></div>' + vrNotes_(m);
 }
 
@@ -552,19 +565,23 @@ function vrY_(v, axis) {
   return Math.max(0, Math.min(H, y));
 }
 
-// 幅340・描画の高さ150 + 上の余白10・下の日付の行24 の SVG。色は CSS の変数だけ(属性に色を書かない)。
-// x = 左 + (i + 0.5) × 描画の幅 / 日数。要素は色ごとの <path> にまとめる(文字数を減らすため)。
+// 幅340・描画の高さ150 + 上の余白22・下の日付の行38 の SVG。色は CSS の変数だけ(属性に色を書かない)。
+// 左に縦軸の欄 66。x = 66 + (i + 0.5) × 描画の幅 / 日数。要素は色ごとの <path> にまとめる(文字数を減らすため)。
+// yaxis / xticks / tips / range / inline / avgs[].short は本体が作った文字と座標用の値で、ここでは並べるだけ(P2)。
+// columns(P3): cols の棒。v が 0 の日は底の細い印(cz)。null の日は材料に無いので描かない。
 function vrSvg_(chart) {
   const c = chart && typeof chart === 'object' ? chart : {};
-  const axis = c.axis && typeof c.axis === 'object' ? c.axis : null;
+  const okAxis = function (a) { return a && typeof a === 'object' && vrNum_(a.lo) !== null && vrNum_(a.hi) !== null && a.hi > a.lo; };
+  const axis = okAxis(c.yaxis) ? c.yaxis : (okAxis(c.axis) ? c.axis : null);
   const dates = vrArr_(c.dates);
   const n = dates.length;
-  if (axis === null || n === 0 || vrNum_(axis.lo) === null || vrNum_(axis.hi) === null || !(axis.hi > axis.lo)) return '';
+  if (axis === null || n === 0) return '';
   const W = VR_SVG_WIDTH_;
-  const L = VR_SVG_LEFT_;
+  const L = VR_SVG_YAXIS_W_;
   const T = VR_SVG_TOP_;
-  const PW = W - L - VR_SVG_AXIS_WIDTH_;
-  const total = T + VR_SVG_PLOT_HEIGHT_ + VR_SVG_DATE_ROW_;
+  const PW = W - L - VR_SVG_RIGHT_;
+  const H = VR_SVG_PLOT_HEIGHT_;
+  const total = T + H + VR_SVG_DATE_ROW_;
   const r1 = function (v) { return Math.round(v * 10) / 10; };
   const X = function (i) { return r1(L + (i + 0.5) * PW / n); };
   const Y = function (v) { return T + vrY_(v, axis); };
@@ -572,6 +589,7 @@ function vrSvg_(chart) {
   const rt = r1(Math.min(4.5, PW / n * 0.35));
   const right = L + PW;
   const line = function (y) { return '<path d="M' + L + ' ' + y + 'H' + right + '"/>'; };
+  const inRange = function (e) { return e && Number.isInteger(e.i) && e.i >= 0 && e.i < n; };
 
   const ticks = vrArr_(axis.ticks).filter(function (t) { return t && vrNum_(t.v) !== null; });
   const bars = vrArr_(c.bars).filter(function (b) { return b && vrNum_(b.i) !== null && vrNum_(b.from) !== null && vrNum_(b.to) !== null; });
@@ -579,6 +597,7 @@ function vrSvg_(chart) {
     return s && vrNum_(s.i) !== null && vrNum_(s.deep) !== null && vrNum_(s.rem) !== null && vrNum_(s.light) !== null;
   });
   const points = vrArr_(c.points).filter(function (p) { return p && vrNum_(p.i) !== null && vrNum_(p.v) !== null; });
+  const cols = vrArr_(c.cols).filter(function (p) { return p && vrNum_(p.i) !== null && vrNum_(p.v) !== null && p.v >= 0; });
   const lastOf = function (list) { return list.reduce(function (m, e) { return Math.max(m, e.i); }, -1); };
 
   let out = '<svg class="plot" viewBox="0 0 ' + W + ' ' + total + '" role="img" aria-label="' + vrEsc_(c.title) + '">';
@@ -614,7 +633,25 @@ function vrSvg_(chart) {
 
   if (points.length > 0) {
     const last = lastOf(points);
-    const rest = points.filter(function (p) { return p.i !== last; }).map(function (p) {
+    const sorted = points.slice().sort(function (a, b) { return a.i - b.i; });
+    if (n > 7) {
+      // 8日以上は線(i が連続する点だけをつなぎ、null の日で切る。1点だけの区間は h.1)
+      let d = '';
+      let run = [];
+      const flush = function () {
+        if (run.length === 1) d += 'M' + X(run[0].i) + ' ' + Y(run[0].v) + 'h.1';
+        else if (run.length > 1) d += run.map(function (p, j) { return (j === 0 ? 'M' : 'L') + X(p.i) + ' ' + Y(p.v); }).join('');
+        run = [];
+      };
+      sorted.forEach(function (p) {
+        if (run.length > 0 && p.i !== run[run.length - 1].i + 1) flush();
+        run.push(p);
+      });
+      flush();
+      out += '<path class="ln" d="' + d + '"/>';
+    }
+    const dots = n < 32 ? points : points.filter(function (p) { return p.i === last; });
+    const rest = dots.filter(function (p) { return p.i !== last; }).map(function (p) {
       return '<circle cx="' + X(p.i) + '" cy="' + Y(p.v) + '" r="' + rt + '"/>';
     }).join('');
     if (rest !== '') out += '<g class="pt f">' + rest + '</g>';
@@ -623,15 +660,74 @@ function vrSvg_(chart) {
     }).join('');
   }
 
+  if (cols.length > 0) {
+    const last = lastOf(cols);
+    const rect = function (e) {
+      return 'M' + r1(X(e.i) - bw / 2) + ' ' + Y(e.v) + 'h' + bw + 'v' + Math.max(1, Y(0) - Y(e.v)) + 'h-' + bw + 'z';
+    };
+    const pos = cols.filter(function (e) { return e.v > 0; });
+    const rest = pos.filter(function (e) { return e.i !== last; }).map(rect).join('');
+    if (rest !== '') out += '<path class="cb f" d="' + rest + '"/>';
+    const lastD = pos.filter(function (e) { return e.i === last; }).map(rect).join('');
+    if (lastD !== '') out += '<path class="cb" d="' + lastD + '"/>';
+    const zero = cols.filter(function (e) { return e.v === 0; }).map(function (e) {
+      return 'M' + r1(X(e.i) - bw / 2) + ' ' + (Y(0) - 1) + 'h' + bw;
+    }).join('');
+    if (zero !== '') out += '<path class="cz" d="' + zero + '"/>';
+  }
+
   const avs = vrArr_(c.avgs).filter(function (a) { return a && vrNum_(a.v) !== null; });
   if (avs.length > 0) out += '<g class="av">' + avs.map(function (a) { return line(Y(a.v)); }).join('') + '</g>';
-
-  out += '<g class="tx">' + ticks.map(function (t) {
-    return '<text x="' + (right + 6) + '" y="' + (Y(t.v) + 4) + '">' + vrEsc_(t.text) + '</text>';
-  }).join('') + '</g><g class="tx m">';
-  const step = Math.max(1, Math.ceil(n / 4));
-  for (let j = n - 1; j >= 0; j -= step) {
-    out += '<text x="' + X(j) + '" y="' + (total - 6) + '">' + vrEsc_(dates[j]) + '</text>';
+  const shorts = avs.filter(function (a) { return typeof a.short === 'string' && a.short !== ''; });
+  if (shorts.length > 0) {
+    out += '<g class="al">' + shorts.map(function (a) { return '<text x="' + (right - 2) + '" y="' + (Y(a.v) - 4) + '">' + vrEsc_(a.short) + '</text>'; }).join('') + '</g>';
   }
-  return out + '</g></svg>';
+
+  const rg = c.range && typeof c.range === 'object' ? c.range : null;
+  const marks = rg === null ? [] : vrArr_(rg.marks).filter(function (m) { return inRange(m) && vrNum_(m.v) !== null && (m.dir === 'max' || m.dir === 'min'); });
+  if (marks.length > 0) {
+    out += '<path class="mk" d="' + marks.map(function (m) {
+      return m.dir === 'max'
+        ? 'M' + r1(X(m.i) - 4) + ' ' + (Y(m.v) - 6) + 'h8l-4-7z'
+        : 'M' + r1(X(m.i) - 4) + ' ' + (Y(m.v) + 6) + 'h8l-4 7z';
+    }).join('') + '"/>';
+  }
+
+  const inl = vrArr_(c.inline).filter(function (e) { return inRange(e) && vrNum_(e.v) !== null && typeof e.text === 'string' && (e.pos === 'above' || e.pos === 'below'); });
+  if (inl.length > 0) {
+    out += '<g class="tx m il">' + inl.map(function (e) {
+      return '<text x="' + X(e.i) + '" y="' + (e.pos === 'above' ? Y(e.v) - 7 : Y(e.v) + 14) + '">' + vrEsc_(e.text) + '</text>';
+    }).join('') + '</g>';
+  }
+
+  out += '<g class="yt">' + ticks.map(function (t) {
+    return '<text x="' + (L - 6) + '" y="' + (Y(t.v) + 4) + '">' + vrEsc_(t.text) + '</text>';
+  }).join('') + '</g>';
+  if (typeof axis.unit_label === 'string' && axis.unit_label !== '') out += '<text class="yu" x="60" y="12">' + vrEsc_(axis.unit_label) + '</text>';
+
+  const xt = vrArr_(c.xticks).filter(function (t) { return inRange(t) && typeof t.text === 'string'; });
+  out += '<g class="tx m">';
+  if (xt.length > 0) {
+    xt.forEach(function (t) {
+      // 右端に収まらない最後のラベルだけ右に寄せる(class ea = text-anchor:end)
+      const e = X(t.i) + 18 > W;
+      const x = e ? W : X(t.i);
+      const cl = e ? ' class="ea"' : '';
+      out += '<text' + cl + ' x="' + x + '" y="' + (T + H + 20) + '">' + vrEsc_(t.text) + '</text>';
+      if (typeof t.sub === 'string' && t.sub !== '') out += '<text' + cl + ' x="' + x + '" y="' + (T + H + 34) + '">' + vrEsc_(t.sub) + '</text>';
+    });
+  } else {
+    const step = Math.max(1, Math.ceil(n / 4));
+    for (let j = n - 1; j >= 0; j -= step) {
+      out += '<text x="' + X(j) + '" y="' + (T + H + 20) + '">' + vrEsc_(dates[j]) + '</text>';
+    }
+  }
+  out += '</g>';
+
+  // タップの列(最後に置く。押した列の番号を app.js が読む)
+  const cw = r1(PW / n);
+  vrArr_(c.tips).filter(inRange).forEach(function (t) {
+    out += '<rect class="hit" data-i="' + t.i + '" x="' + r1(X(t.i) - PW / n / 2) + '" y="' + T + '" width="' + cw + '" height="' + H + '"/>';
+  });
+  return out + '</svg>';
 }
