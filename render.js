@@ -4,7 +4,7 @@
 // 関数名・定数名は _ で終える(GAS にそのまま写せる形。viewer/ の描画と同じ出力を目指す)。
 // モデル由来の文字列は必ず vrEsc_ を通す。色は種類の区別だけで、良し悪しでは塗らない。
 
-const VR_VERSION_ = 8;
+const VR_VERSION_ = 9;
 
 // 種類 -> 色のクラス(cls は文字と見出し・k はグラフの濃淡)・アイコン・名前。区分の無い・未知の値は VR_GROUP_OTHER_。
 const VR_GROUPS_ = {
@@ -23,13 +23,21 @@ const VR_TEXT_ = {
   clear: 'この端末の記録を消す',
   cleared: 'この端末に残した記録を消しました。次に開くと本体から読み直し、また最後の1回分だけ残します。',
   stale_prev: '前回の記録',
+  ask_loading: '読み込み中…',
+  ask_failed: '読み込めませんでした。開き直してください。',
+  ask_intro: 'お返事はこの画面に出ます。できてから3分ほど、この「質問」のタブで見ていないときは LINE に届きます。',
+  hist_head: 'これまでのやり取り(7日)',
+  hist_loading: '読み込んでいます…',
+  hist_failed: 'これまでのやり取りを読み込めませんでした。',
+  hist_none: 'この7日のやり取りはありません。',
 };
+const VR_TABS_ = [['today', '今朝'], ['trend', '推移'], ['ask', '質問'], ['past', 'これまで']];
 // 質問する欄の文(docs/plan-20261117-web-ask-3.md 4-1)。waiting の {until} は vrAskMsg_ が差し込む。
 const VR_ASK_TEXT_ = {
   sending: '送信中…',
   shrinking: '写真を縮めて送っています…',
-  waiting: '受け取りました。お返事を書いています。お返事はこの画面に出ます(できてから3分ほどこの画面で見ていないときは LINE に届きます)。',
-  queued: '受け取りました。前のお返事の後に書きます。お返事はこの画面に出ます(できてから3分ほどこの画面で見ていないときは LINE に届きます)。',
+  waiting: '受け取りました。お返事を書いています。',
+  queued: '受け取りました。前のお返事の後に書きます。',
   seen: 'この画面でお返事を表示しました。LINE には送りません。',
   line_push: 'このお返事は LINE にも送りました。',
   line_push_floor: 'このお返事は LINE にも送りました。',
@@ -201,7 +209,8 @@ function vrWake_(latest, noPress) {
 function vrCoachFollowups_(model, noPress) {
   const c = model && typeof model === 'object' && model.coach && typeof model.coach === 'object' ? model.coach : null;
   if (c === null) return '';
-  const list = vrArr_(c.followups).filter(function (f) { return f && typeof f === 'object' && typeof f.push_id === 'string' && VR_PUSH_ID_PATTERN_.test(f.push_id); });
+  const todayId = c.today && typeof c.today === 'object' && typeof c.today.push_id === 'string' ? c.today.push_id : '';
+  const list = vrArr_(c.followups).filter(function (f) { return f && typeof f === 'object' && typeof f.push_id === 'string' && VR_PUSH_ID_PATTERN_.test(f.push_id) && !(todayId !== '' && f.push_id === todayId); });
   if (list.length === 0) return '';
   const labels = vrArr_(c.labels).filter(function (l) { return l && typeof l === 'object' && typeof l.id === 'string' && typeof l.label === 'string' && l.label !== ''; });
   const cards = list.map(function (f) {
@@ -216,6 +225,24 @@ function vrCoachFollowups_(model, noPress) {
   return '<div class="card fu">' + vrHead_({ cls: 'c-mind', icon: 'i-check' }, '一手の記録') + cards + '</div>';
 }
 
+// 3a. 今日の一手(coach.today。最後の push が今日のときだけ)。ボタンの配線は apWireFollowups_(一手の記録と同じ)。
+function vrCoachToday_(model, noPress) {
+  const c = model && typeof model === 'object' && model.coach && typeof model.coach === 'object' ? model.coach : null;
+  const t = c !== null && c.today && typeof c.today === 'object' ? c.today : null;
+  if (t === null || typeof t.push_id !== 'string' || !VR_PUSH_ID_PATTERN_.test(t.push_id)) return '';
+  const labels = vrArr_(c.labels).filter(function (l) { return l && typeof l === 'object' && typeof l.id === 'string' && typeof l.label === 'string' && l.label !== ''; });
+  const rec = typeof t.result_label === 'string' && t.result_label !== '' ? '記録: ' + vrEsc_(t.result_label) : 'まだ記録がありません';
+  const buttons = noPress ? '' : '<div class="seg">' + labels.map(function (l) {
+    return '<button type="button" data-fu-push="' + vrEsc_(t.push_id) + '" data-fu-result="' + vrEsc_(l.id) + '" aria-pressed="'
+      + (t.result === l.id ? 'true' : 'false') + '">' + vrEsc_(l.label) + '</button>';
+  }).join('') + '</div><p class="fu-out" role="status"></p>';
+  return '<div class="card today">' + vrHead_({ cls: 'c-mind', icon: 'i-check' }, '今日の一手')
+    + '<p class="lead">' + vrEsc_(t.what) + '</p>'
+    + (typeof t.when === 'string' && t.when !== '' ? '<p class="sub">' + vrEsc_(t.when) + '</p>' : '')
+    + '<p class="saved">' + rec + '</p>' + buttons
+    + '<p class="sub">夜に記録すると、翌朝のメッセージに使われます。</p></div>';
+}
+
 // 3c. 目標(coach.goals / goal_choices / goal_max)。coach が無ければ何も出さない。保存の配線は app.js(apWireGoals_)。
 // 今の目標の文と「M月D日(曜)から」(since_label)。!noPress のときだけ goal_max 個の select(「なし」+ 選択肢)と保存ボタン。
 function vrCoachGoals_(model, noPress) {
@@ -226,7 +253,8 @@ function vrCoachGoals_(model, noPress) {
   const max = vrNum_(c.goal_max);
   const now = goals.length === 0 ? '<p class="saved">目標はまだ決めていません</p>' : goals.map(function (g) {
     const since = typeof g.since_label === 'string' && g.since_label !== '' ? '<p class="sub">' + vrEsc_(g.since_label) + '</p>' : '';
-    return '<p class="goal-text">' + vrEsc_(g.text) + '</p>' + since;
+    const line = typeof g.latest_line === 'string' && g.latest_line !== '' ? '<p class="sub">' + vrEsc_(g.latest_line) + '</p>' : '';
+    return '<p class="goal-text">' + vrEsc_(g.text) + '</p>' + since + line;
   }).join('');
   let form = '';
   if (!noPress && max !== null && max > 0 && groups.length > 0) {
@@ -239,7 +267,7 @@ function vrCoachGoals_(model, noPress) {
         }).join('') + '</optgroup>';
       }).join('') + '</select>';
     }
-    form = '<div class="goal-form">' + selects + '<button type="button" data-goal-save="1">保存</button></div><p class="goal-out" id="goal-out" role="status"></p>';
+    form = '<details class="gedit"><summary>目標を変える</summary><div class="goal-form">' + selects + '<button type="button" data-goal-save="1">保存</button></div></details><p class="goal-out" id="goal-out" role="status"></p>';
   }
   return '<div class="card goal">' + vrHead_({ cls: 'c-mind', icon: 'i-check' }, '目標') + now + form
     + '<p class="sub">目標は翌朝から使われます(5時より前に決めた目標はその朝から)。</p></div>';
@@ -251,7 +279,7 @@ function vrCoachWeekly_(model) {
   const w = c !== null && c.weekly && typeof c.weekly === 'object' ? c.weekly : null;
   if (w === null || vrStr_(w.text) === '') return '';
   const when = vrStr_(w.date_label).replace(/\([^()]*\)$/, '');
-  return '<details class="card pastwrap"><summary>週の振り返り' + (when !== '' ? '(' + vrEsc_(when) + ')' : '') + '</summary><div class="in">' + vrParas_(w.text, '') + '</div></details>';
+  return '<details class="card pastwrap" open><summary>週の振り返り' + (when !== '' ? '(' + vrEsc_(when) + ')' : '') + '</summary><div class="in">' + vrParas_(w.text, '') + '</div></details>';
 }
 
 // 4. 本文(評価の文を抜いたもの)。3 でカードを出さず coda_text があれば、問いをここに出す。
@@ -277,9 +305,8 @@ function vrAsk_(latest, ask) {
     + '<textarea id="ask-text" maxlength="' + vrEsc_(textMax) + '" rows="3" aria-label="質問"></textarea>'
     + photo
     + '<p><button type="button" id="ask-send">送る</button></p>'
-    + '<p id="ask-status" role="status"></p><div id="ask-list"></div>'
-    + '<p class="hint">お返事はこの画面に出ます。できてから3分ほどこの画面で見ていないときは LINE に届きます。</p>'
-    + (vrNum_(ask.today) !== null ? '<p class="hint">今日、画面から受け付けた質問: ' + vrEsc_(ask.today) + '件</p>' : '') + '</div>';
+    + '<p id="ask-status" role="status"></p>'
+    + (vrNum_(ask.today) !== null ? '<p class="hint">今日、画面から受け付けた質問: ' + vrEsc_(ask.today) + '件</p>' : '') + '</div><div id="ask-list"></div>';
 }
 
 // 小さな推移(28日の値。null で線を切る)。
@@ -338,40 +365,27 @@ function vrPanel_(chart, tileName) {
     + vrSvg_(chart) + (keys.length > 0 ? '<div class="keys">' + keys.join('') + '</div>' : '') + '</div>';
 }
 
-// タイル1枚。chart があれば押して開く(<details>)。無ければ平たいまま。
-function vrTile_(f, chart, n) {
+// タイル1枚(平たい。グラフと小さな線は出さない)。グラフのある指標(chart が c + 数字)は押すと推移のタブのそのグラフへ。
+function vrTile_(f, n) {
   const info = vrGroupInfo_(f.group);
   const band = vrStr_(f.band) !== '' && f.band_usual !== true ? f.band : '';
   const head = '<div class="head ' + info.cls + '">' + vrIcon_(info.icon) + vrEsc_(f.name) + '</div>';
   const body = '<div class="big num">' + vrValueHtml_(f.today) + '</div>'
     + (vrStr_(f.d28) !== '' ? '<div class="avg">平均 ' + vrEsc_(f.d28) + '</div>' : '')
     + (band !== '' ? '<span class="pill">' + vrEsc_(band) + '</span>' : '');
-  if (chart === null) return '<div class="tile flat">' + head + body + '</div>';
-  const spark = vrSpark_(f.spark);
-  const id = 'r' + n;
-  const long = chart.d90 && typeof chart.d90 === 'object' ? chart.d90 : null;
-  return '<details class="tile"><summary>' + head + body + (spark !== '' ? '<span class="spk ' + info.cls + '">' + spark + '</span>' : '') + '</summary><div class="dz">'
-    + '<input class="tin ra" type="radio" name="' + id + '" id="' + id + 'a"><input class="tin rb" type="radio" name="' + id + '" id="' + id + 'b" checked>'
-    + (long !== null ? '<input class="tin rc" type="radio" name="' + id + '" id="' + id + 'c">' : '')
-    + '<div class="range"><label class="la" for="' + id + 'a">7日</label><label class="lb" for="' + id + 'b">28日</label>'
-    + (long !== null ? '<label class="lc" for="' + id + 'c">90日</label>' : '') + '</div>'
-    + '<div class="p7">' + vrPanel_(chart.d7, f.name) + '</div><div class="p28">' + vrPanel_(chart.d28, f.name) + '</div>'
-    + (long !== null ? '<div class="p90">' + vrPanel_(long, f.name) + '</div>' : '') + '</div></details>';
+  if (typeof f.chart === 'string' && /^c[0-9]+$/.test(f.chart)) {
+    return '<div class="tile go" role="button" tabindex="0" data-goto="' + vrEsc_(f.chart) + '">' + head + body + '</div>';
+  }
+  return '<div class="tile flat">' + head + body + '</div>';
 }
 
-// 5. タイル(睡眠 → 回復 → 活動 → 区分なし)。sleep_bars と同じ名前のタイルはカードと重複するので出さない。
-function vrTiles_(latest, charts) {
+// 指標のタイル(睡眠 → 回復 → 活動 → 区分なし)。sleep_bars と同じ名前のタイルはカードと重複するので出さない。
+function vrTiles_(latest) {
   if (!latest || typeof latest !== 'object') return '';
   const bars = latest.sleep_bars && typeof latest.sleep_bars === 'object' ? latest.sleep_bars : null;
   const facts = vrArr_(latest.facts).filter(function (f) {
     return f && typeof f === 'object' && !(bars !== null && typeof bars.name === 'string' && f.name === bars.name);
   });
-  const list = vrArr_(charts);
-  const chartOf = function (id) {
-    if (typeof id !== 'string') return null;
-    for (let i = 0; i < list.length; i++) if (list[i] && list[i].id === id) return list[i];
-    return null;
-  };
   const order = VR_GROUP_ORDER_.concat(['']);
   const keyOf = function (f) { return VR_GROUP_ORDER_.indexOf(f.group) !== -1 ? f.group : ''; };
   let n = 0;
@@ -381,15 +395,15 @@ function vrTiles_(latest, charts) {
     const info = k === '' ? VR_GROUP_OTHER_ : VR_GROUPS_[k];
     const day = vrStr_(items[0].day) !== '' && items.every(function (f) { return f.day === items[0].day; }) ? items[0].day : '';
     return '<div class="sec"><h2>' + vrEsc_(info.name) + '</h2>' + (day !== '' ? '<span>' + vrEsc_(day) + '</span>' : '') + '</div>'
-      + '<div class="grid">' + items.map(function (f) { const t = vrTile_(f, chartOf(f.chart), n); n += 1; return t; }).join('') + '</div>';
+      + '<div class="grid">' + items.map(function (f) { const t = vrTile_(f, n); n += 1; return t; }).join('') + '</div>';
   }).join('');
 }
 
-// 6. 過去7日の朝(最下部に畳む)。0件なら何も出さない。
+// 6. 過去7日の朝(畳まない。各朝の中身は各 <details>)。0件なら何も出さない。
 function vrPast_(past) {
   const list = vrArr_(past);
   if (list.length === 0) return '';
-  return '<details class="card pastwrap"><summary>過去7日の朝(' + list.length + '件)</summary><div class="list">' + list.map(function (p) {
+  return '<div class="sec"><h2>過去7日の朝</h2></div><div class="card plist"><div class="list">' + list.map(function (p) {
     const x = p && typeof p === 'object' ? p : {};
     const replies = vrArr_(x.replies);
     const a = x.answer && typeof x.answer === 'object' ? x.answer : null;
@@ -403,7 +417,7 @@ function vrPast_(past) {
     return '<details><summary><div><div class="dt">' + vrEsc_(when) + '</div><div class="ds">' + vrEsc_(x.time)
       + vrEsc_(verdict) + '</div></div><span class="tag">' + vrEsc_(tag) + '</span></summary><div class="in">'
       + vrParas_(x.body, '') + (vrStr_(x.coda_text) !== '' ? vrParas_(x.coda_text, 'coda') : '') + bubbles + '</div></details>';
-  }).join('') + '</div></details>';
+  }).join('') + '</div></div>';
 }
 
 // 7. 注記(最下部に1回)。
@@ -438,16 +452,89 @@ function vrCleared_() {
   return '<div class="wrap"><h1>からだの記録</h1><div class="card"><p>' + VR_TEXT_.cleared + '</p></div></div>';
 }
 
-function vrPage_(model, view) {
-  const stale = view && typeof view === 'object' && (view.stale === 'loading' || view.stale === 'failed') ? view : null;
-  const noPress = stale !== null;
-  const m = model && typeof model === 'object' ? model : {};
+// タブの帯(下に固定)。質問のラベルの点(.dot)は app.js が出し入れする。
+function vrNav_(tab) {
+  return '<nav class="tabs" role="tablist">' + VR_TABS_.map(function (t) {
+    return '<button type="button" role="tab" data-tab="' + t[0] + '" aria-selected="' + (t[0] === tab ? 'true' : 'false') + '">' + t[1]
+      + (t[0] === 'ask' ? '<b class="dot" hidden></b>' : '') + '</button>';
+  }).join('') + '</nav>';
+}
+
+// 今朝のタブ: 日付 → 今日の一手 → 睡眠 → 今朝の問い → 一手の記録 → 今朝のメッセージ → 目標 → 指標のタイル。
+function vrTabToday_(m, noPress) {
   const latest = m.latest && typeof m.latest === 'object' ? m.latest : null;
   const top = latest === null
     ? '<h1>今朝</h1><div class="card"><p>' + VR_TEXT_.empty + '</p></div>'
-    : vrDate_(latest, noPress) + vrSleep_(latest) + vrWake_(latest, noPress) + vrCoachFollowups_(m, noPress) + vrMsg_(latest, noPress) + (noPress ? '' : vrAsk_(latest, m.ask));
-  const goals = vrCoachGoals_(m, noPress);
-  return VR_SPRITE_ + '<div class="wrap">' + (stale ? vrStale_(m.now, stale) : '') + top + goals + vrTiles_(latest, m.charts) + vrCoachWeekly_(m) + vrPast_(m.past) + vrNotes_(m) + vrClear_() + '</div>';
+    : vrDate_(latest, noPress) + vrCoachToday_(m, noPress) + vrSleep_(latest) + vrWake_(latest, noPress) + vrCoachFollowups_(m, noPress) + vrMsg_(latest, noPress);
+  return top + vrCoachGoals_(m, noPress) + vrTiles_(latest);
+}
+
+// 推移のタブ: 範囲の切り替えを上に1つ → charts[] を順にすべて並べる → 注記。
+function vrTabTrend_(m) {
+  const charts = vrArr_(m.charts).filter(function (c) { return c && typeof c === 'object' && typeof c.id === 'string' && /^[A-Za-z0-9_-]{1,20}$/.test(c.id); });
+  if (charts.length === 0) return '<p class="none">' + VR_TEXT_.none + '</p>' + vrNotes_(m);
+  const has90 = charts.some(function (c) { return c.d90 && typeof c.d90 === 'object'; });
+  return '<div class="tz"><input class="tin ra" type="radio" name="rg" id="rg7"><input class="tin rb" type="radio" name="rg" id="rg28" checked>'
+    + (has90 ? '<input class="tin rc" type="radio" name="rg" id="rg90">' : '')
+    + '<div class="range"><label class="la" for="rg7">7日</label><label class="lb" for="rg28">28日</label>'
+    + (has90 ? '<label class="lc" for="rg90">90日</label>' : '') + '</div><div class="charts">'
+    + charts.map(function (c) {
+      return '<div class="chart" id="ch-' + c.id + '"><div class="p7">' + vrPanel_(c.d7, '') + '</div><div class="p28">' + vrPanel_(c.d28, '') + '</div>'
+        + (has90 ? '<div class="p90">' + vrPanel_(c.d90 && typeof c.d90 === 'object' ? c.d90 : null, '') + '</div>' : '') + '</div>';
+    }).join('') + '</div></div>' + vrNotes_(m);
+}
+
+// 質問のタブ: 説明(1回だけ)→ 入力欄・写真 → この画面で送ったやり取り → これまでのやり取り(7日。app.js が #ask-hist に差し込む)。
+function vrTabAsk_(m, view) {
+  if (view && typeof view === 'object' && view.stale === 'loading') return '<p class="hint">' + VR_TEXT_.ask_loading + '</p>';
+  if (view && typeof view === 'object' && view.stale === 'failed') return '<p class="hint">' + VR_TEXT_.ask_failed + '</p>';
+  const ask = m.ask && typeof m.ask === 'object' ? m.ask : null;
+  const latest = m.latest && typeof m.latest === 'object' ? m.latest : null;
+  if (ask === null || ask.on !== true || latest === null || typeof latest.push_id !== 'string' || !VR_PUSH_ID_PATTERN_.test(latest.push_id)) {
+    return '<p class="hint">' + VR_ASK_TEXT_.off + '</p>';
+  }
+  return '<p class="hint">' + VR_TEXT_.ask_intro + '</p>' + vrAsk_(latest, ask)
+    + '<div class="sec"><h2>' + VR_TEXT_.hist_head + '</h2></div><div id="ask-hist"><p class="hint">' + VR_TEXT_.hist_loading + '</p></div>';
+}
+
+// 質問のタブの7日のやり取り(view_page_ask_history の応答 h)。ref(nonce)は HTML に書かない。
+function vrAskHistory_(h) {
+  if (!h || typeof h !== 'object' || h.ok !== true) return '<p class="hint">' + VR_TEXT_.hist_failed + '</p>';
+  if (h.on !== true) return '';
+  const w = vrNum_(h.waiting);
+  const waiting = w !== null && w >= 1 ? '<p class="hint">画面から送った質問のうち ' + vrEsc_(w) + '件は、お返事を書いています(できたらここか LINE に届きます)。</p>' : '';
+  const items = vrArr_(h.items);
+  if (items.length === 0) return waiting + '<p class="hint">' + VR_TEXT_.hist_none + '</p>';
+  return waiting + items.map(function (it, i) {
+    const x = it && typeof it === 'object' ? it : {};
+    const a = typeof x.a === 'string' ? x.a : VR_ASK_TEXT_.too_long;
+    return '<div class="ask-item past" data-h="' + i + '"><p class="at">' + vrEsc_(x.at) + '</p><p class="ask-q">' + vrEsc_(x.q) + '</p>'
+      + '<div class="ans">' + vrEsc_(a) + '</div><p class="ask-st" role="status"></p></div>';
+  }).join('');
+}
+
+// これまでのタブ: 週の振り返り → 過去7日の朝 → この端末の記録を消す。
+function vrTabPast_(m) {
+  return vrCoachWeekly_(m) + vrPast_(m.past) + vrClear_();
+}
+
+// ページ全体: 4つのタブ(すべて DOM に置き、hidden で切り替える)+ 下の帯。view.tab が4つのどれかならそのタブ、それ以外は今朝。
+function vrPage_(model, view) {
+  const v = view && typeof view === 'object' ? view : {};
+  const stale = v.stale === 'loading' || v.stale === 'failed' ? v : null;
+  const noPress = stale !== null;
+  const m = model && typeof model === 'object' ? model : {};
+  const tab = VR_TABS_.some(function (t) { return t[0] === v.tab; }) ? v.tab : 'today';
+  const bodies = {
+    today: vrTabToday_(m, noPress),
+    trend: vrTabTrend_(m),
+    ask: vrTabAsk_(m, stale),
+    past: vrTabPast_(m),
+  };
+  return VR_SPRITE_ + '<div class="wrap">' + (stale ? vrStale_(m.now, stale) : '')
+    + VR_TABS_.map(function (t) {
+      return '<section class="tab" id="tab-' + t[0] + '" role="tabpanel"' + (t[0] === tab ? '' : ' hidden') + '>' + bodies[t[0]] + '</section>';
+    }).join('') + '</div>' + vrNav_(tab);
 }
 
 function vrError_(code) {

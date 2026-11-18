@@ -2,8 +2,8 @@
 // 本体の ID と鍵はページの URL のフラグメント(# の後ろ)にだけ置く。鍵とデプロイ ID は端末に保存しない。端末に残すのは本体が返した材料の最後の1回分だけ(apStorage_ の4関数。docs/plan-20261116-web-page-4.md)。
 // HTML の組み立ては render.js(純関数)。ここは通信・計測・ボタンの配線だけ。
 
-const AP_VERSION_ = 6;
-const AP_ACTIONS_ = ['view_page_data', 'view_page_answer', 'view_page_timing', 'view_page_ask', 'view_page_ask_photo', 'view_page_ask_status', 'view_page_ask_seen', 'view_page_followup', 'view_page_goals'];
+const AP_VERSION_ = 7;
+const AP_ACTIONS_ = ['view_page_data', 'view_page_answer', 'view_page_timing', 'view_page_ask', 'view_page_ask_photo', 'view_page_ask_status', 'view_page_ask_seen', 'view_page_followup', 'view_page_goals', 'view_page_ask_history'];
 const AP_TIMEOUT_MS_ = 25000;
 // 質問する欄(docs/plan-20261117-web-ask-3.md 4-2)。長辺 px と JPEG の画質の順(1枚 1,000,000 バイト以下になるまで)。
 const AP_ASK_PHOTO_TIMEOUT_MS_ = 120000;
@@ -145,8 +145,51 @@ function apStoreClear_() {
   try { store.removeItem(AP_STORE_KEY_); return true; } catch (err) { return false; }
 }
 
-function apShow_(html, st) {
-  document.getElementById('app').innerHTML = html;
+// HTML を差し込む唯一の関数(ほかの場所で HTML の文字列を書き込まない)。
+function apSetHtml_(el, html) {
+  el.innerHTML = html;
+}
+
+function apDot_(on) {
+  const d = document.querySelector('[data-tab="ask"] .dot');
+  if (d) d.hidden = !on;
+}
+
+// 4つのタブの hidden と aria-selected をそろえる。質問のタブを開いたときは apAskOnTab_。
+function apTab_(st, name) {
+  Array.prototype.forEach.call(document.querySelectorAll('section.tab'), function (sec) {
+    sec.hidden = sec.id !== 'tab-' + name;
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-tab]'), function (b) {
+    b.setAttribute('aria-selected', b.getAttribute('data-tab') === name ? 'true' : 'false');
+  });
+  st.tab = name;
+  if (name === 'ask') apAskOnTab_(st);
+}
+
+// タイルを押すと推移のタブのそのグラフへ(今朝・推移・これまでを描き直した後も配線し直す)。
+function apWireGotos_(st) {
+  const go = function (el) {
+    const id = el.getAttribute('data-goto');
+    if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,20}$/.test(id)) return;
+    apTab_(st, 'trend');
+    const target = document.getElementById('ch-' + id);
+    if (target && typeof target.scrollIntoView === 'function') target.scrollIntoView();
+  };
+  Array.prototype.forEach.call(document.querySelectorAll('[data-goto]'), function (el) {
+    el.addEventListener('click', function () { go(el); });
+    el.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') go(el); });
+  });
+}
+
+function apWireTabs_(st) {
+  Array.prototype.forEach.call(document.querySelectorAll('[data-tab]'), function (b) {
+    b.addEventListener('click', function () { apTab_(st, b.getAttribute('data-tab')); });
+  });
+  apWireGotos_(st);
+}
+
+function apWireClear_(st) {
   const clr = document.getElementById('clear');
   if (clr && st) {
     clr.addEventListener('click', function () {
@@ -157,39 +200,69 @@ function apShow_(html, st) {
   }
 }
 
+function apShow_(html, st) {
+  apSetHtml_(document.getElementById('app'), html);
+  apWireClear_(st);
+  if (st && document.querySelector('[data-tab]')) apWireTabs_(st);
+}
+
 // 前回の中身があれば帯つきで先に出す。出したら true。
 function apShowStale_(st, nowMs) {
   st.stale = apStoreRead_(nowMs);
   if (!st.stale) return false;
-  apShow_(vrPage_(st.stale, { stale: 'loading' }), st);
+  apShow_(vrPage_(st.stale, { stale: 'loading', tab: st.tab }), st);
   return true;
 }
 
-// 本体の返事を描く。何も描かなかったときと失敗の画面のときは null、描いたときは { html, model }。
-function apOnData_(st, r, nowMs) {
+// 今朝のタブの配線(目覚めの質問・一手と今日の一手・目標)。
+function apWireToday_(st) {
+  apWire_(st.mk);
+  apWireFollowups_(st.mk);
+  apWireGoals_(st);
+}
+
+// 本体の返事を描く。何も描かなかったときと失敗の画面のときは null、描いたときは { html, model }(refresh の html は null)。
+// mode === 'refresh'(目標の保存の後)は成功のときだけ今朝・推移・これまでを差し替える(質問のタブの問い合わせと入力中の文を消さない)。
+function apOnData_(st, r, nowMs, mode) {
   if (st.cleared) return null;
   const c = apClassify_(r);
-  st.t.p_parse = apNow_();
+  const refresh = mode === 'refresh';
+  if (refresh && !c.model) {
+    const o = document.getElementById('goal-out');
+    if (o) o.textContent = '保存しました。読み直しはできませんでした。開き直してください。';
+    return null;
+  }
+  if (!refresh) st.t.p_parse = apNow_();
   if (!c.model) {
     if (AP_STORE_DROP_CODES_.indexOf(c.code) !== -1) {
       apStoreClear_();
       st.stale = null;
       apShow_(vrError_(c.code), st);
     } else if (st.stale) {
-      apShow_(vrPage_(st.stale, { stale: 'failed', code: c.code }), st);
+      apShow_(vrPage_(st.stale, { stale: 'failed', code: c.code, tab: st.tab }), st);
     } else {
       apShow_(vrError_(c.code), st);
     }
     return null;
   }
-  const html = vrPage_(c.model);
-  apShow_(html, st);
-  st.t.p_render = apNow_();
-  apWire_(st.mk);
-  apWireFollowups_(st.mk);
-  apWireGoals_(st);
-  apWireAsk_(st.mk, c.model);
+  st.model = c.model;
+  let html = null;
+  if (refresh) {
+    apSetHtml_(document.getElementById('tab-today'), vrTabToday_(c.model, false));
+    apSetHtml_(document.getElementById('tab-trend'), vrTabTrend_(c.model));
+    apSetHtml_(document.getElementById('tab-past'), vrTabPast_(c.model));
+    apWireToday_(st);
+    apWireGotos_(st);
+    apWireClear_(st);
+  } else {
+    html = vrPage_(c.model, { tab: st.tab });
+    apShow_(html, st);
+    st.t.p_render = apNow_();
+    apWireToday_(st);
+    apWireAsk_(st);
+  }
   apStoreWrite_(c.model, nowMs);
+  if (!refresh && st.tab === 'ask') apAskOnTab_(st);
   return { html: html, model: c.model };
 }
 
@@ -278,9 +351,9 @@ function apWireGoals_(st) {
       if (!r || typeof r !== 'object') { show('保存できませんでした。'); return; }
       if (r.ok === true) {
         apPost_(apEndpoint_(st.mk.m, 'view_page_data'), { k: st.mk.k }).then(function (d) {
-          apOnData_(st, d, Date.now());
+          const done = apOnData_(st, d, Date.now(), 'refresh');
           const o2 = document.getElementById('goal-out');
-          if (o2) o2.textContent = '保存しました。';
+          if (done && o2) o2.textContent = '保存しました。';
         });
         return;
       }
@@ -348,7 +421,9 @@ function apAskShrink_(file, maxBytes) {
 
 // 答えの問い合わせ(1件の枠ごと)。nonce が一致する答えだけが返る。質問・写真・答え・nonce は端末に保存しない。
 // 送ってから15分までは15秒おき・その後は60秒おき(150分で終える)。画面が見えない回は送らない。
-function apAskPoll_(mk, nonce, item) {
+// 答えが届いたら問い合わせを止める。「見た」の知らせは、ページが見えていて質問のタブが表示中のときだけ送る。
+function apAskPoll_(st, nonce, item) {
+  const mk = st.mk;
   const t0 = Date.now();
   const say = function (code, info) { item.st.textContent = vrAskMsg_(code, info); };
   const delay = function () { return Date.now() - t0 < AP_ASK_POLL_FAST_FOR_MS_ ? AP_ASK_POLL_MS_ : AP_ASK_POLL_SLOW_MS_; };
@@ -376,8 +451,12 @@ function apAskPoll_(mk, nonce, item) {
         item.ans.hidden = false;
         if (r.answer.line !== null && r.answer.line !== undefined) { item.stopped = true; say('line_' + String(r.answer.line)); return; }
         if (r.answer.seen === true) { item.stopped = true; say('seen'); return; }
-        if (document.visibilityState === 'visible') { item.stopped = true; apAskSeen_(mk, nonce, item, 0); return; }
-        again();
+        item.stopped = true;
+        // 見えていて質問のタブが表示中のときだけ知らせる。そうでなければ点を出し、質問のタブを開いたとき(見えるようになったとき)に知らせる。
+        if (document.visibilityState === 'visible' && st.tab === 'ask') { apAskSeen_(mk, nonce, item, 0); return; }
+        item.nonce = nonce;
+        item.pendingSeen = true;
+        apDot_(true);
         return;
       }
       if (r.state === 'waiting' || r.state === 'queued') { say(r.state); again(); return; }
@@ -410,8 +489,53 @@ function apAskSeen_(mk, nonce, item, n) {
 let apAskUi_ = null;
 let apAskVisBound_ = false;
 
+// 質問のタブを開いた(または見えるようになった)とき。見えていれば、点を出していた答えと履歴の中の未表示の答えに「見た」を知らせる。
+// 履歴は1回のページの表示で1回だけ読む(再読み込みのボタンは作らない)。
+function apAskOnTab_(st) {
+  if (document.visibilityState === 'visible') {
+    if (apAskUi_ !== null) {
+      apAskUi_.items.forEach(function (it) {
+        if (it.pendingSeen) {
+          it.pendingSeen = false;
+          apAskSeen_(st.mk, it.nonce, it, 0);
+        }
+      });
+    }
+    apDot_(false);
+    Object.keys(st.histRefs).forEach(function (i) {
+      const el = document.querySelector('#ask-hist [data-h="' + i + '"] .ask-st');
+      const nonce = st.histRefs[i];
+      delete st.histRefs[i];
+      if (el) apAskSeen_(st.mk, nonce, { st: el }, 0);
+    });
+  }
+  if (!st.hist && !st.histBusy && st.model && st.model.ask && st.model.ask.on === true) apAskHistory_(st);
+}
+
+// 履歴(view_page_ask_history)を #ask-hist に出す。読めなければ「読み込めませんでした」(次に質問のタブを開いたとき読み直す)。
+function apAskHistory_(st) {
+  const box = document.getElementById('ask-hist');
+  if (!box) return;
+  st.histBusy = true;
+  apPost_(apEndpoint_(st.mk.m, 'view_page_ask_history'), { k: st.mk.k }).then(function (res) {
+    st.histBusy = false;
+    const r = !res.error && res.status === 200 ? apParseJson_(res.text) : undefined;
+    const ok = !!r && typeof r === 'object' && r.ok === true;
+    apSetHtml_(box, vrAskHistory_(ok ? r : { ok: false }));
+    if (!ok) return;
+    st.hist = true;
+    st.histRefs = {};
+    (Array.isArray(r.items) ? r.items : []).forEach(function (it, i) {
+      if (it && typeof it === 'object' && typeof it.ref === 'string' && /^[0-9a-f]{32}$/.test(it.ref)) st.histRefs[i] = it.ref;
+    });
+    if (document.visibilityState === 'visible' && st.tab === 'ask') apAskOnTab_(st);
+  });
+}
+
 // 質問する欄の配線(#ask-send が無ければ何もしない)。
-function apWireAsk_(mk, model) {
+function apWireAsk_(st) {
+  const mk = st.mk;
+  const model = st.model;
   const btn = document.getElementById('ask-send');
   if (!btn) return;
   const ask = model && model.ask && typeof model.ask === 'object' ? model.ask : {};
@@ -423,8 +547,7 @@ function apWireAsk_(mk, model) {
   const textEl = document.getElementById('ask-text');
   const photoEl = document.getElementById('ask-photo');
   const list = document.getElementById('ask-list');
-  const ui = { status: document.getElementById('ask-status'), list: list, items: [] };
-  const pushId = model && model.latest && typeof model.latest.push_id === 'string' ? model.latest.push_id : '';
+  const ui = { status: document.getElementById('ask-status'), list: list, items: [], st: st };
   const memo = { sig: '', nonce: '' };
   const say = function (code, info) { ui.status.textContent = vrAskMsg_(code, info); };
   apAskUi_ = ui;
@@ -433,6 +556,7 @@ function apWireAsk_(mk, model) {
     document.addEventListener('visibilitychange', function () {
       if (document.visibilityState !== 'visible' || apAskUi_ === null) return;
       apAskUi_.items.forEach(function (it) { if (typeof it.run === 'function') it.run(); });
+      if (apAskUi_.st.tab === 'ask') apAskOnTab_(apAskUi_.st);
     });
   }
 
@@ -476,7 +600,7 @@ function apWireAsk_(mk, model) {
       say('');
       const item = makeItem(label);
       item.st.textContent = vrAskMsg_(r.queued === true ? 'queued' : 'waiting');
-      apAskPoll_(mk, nonce, item);
+      apAskPoll_(st, nonce, item);
       return;
     }
     if (r.reason === 'wake_failed') { memo.sig = ''; memo.nonce = ''; }
@@ -497,7 +621,7 @@ function apWireAsk_(mk, model) {
     btn.disabled = true;
     if (files.length === 0) {
       say('sending');
-      apPost_(apEndpoint_(mk.m, 'view_page_ask'), { k: mk.k, nonce: nonce, push_id: pushId, text: text }).then(function (res) { finish(res, nonce, label); });
+      apPost_(apEndpoint_(mk.m, 'view_page_ask'), { k: mk.k, nonce: nonce, push_id: apPushIdOf_(st), text: text }).then(function (res) { finish(res, nonce, label); });
       return;
     }
     say('shrinking');
@@ -516,6 +640,12 @@ function apWireAsk_(mk, model) {
     };
     next(0);
   });
+}
+
+// 送るときの push_id(描き直しの後も新しい朝に付く)。
+function apPushIdOf_(st) {
+  const m = st.model;
+  return m && m.latest && typeof m.latest.push_id === 'string' ? m.latest.push_id : '';
 }
 
 function apNow_() {
@@ -541,7 +671,7 @@ function apMain_() {
   const t = {};
   t.p_script = apNow_();
   const mk = apParseHash_(location.hash);
-  const st = { mk: mk, stale: null, cleared: false, t: t };
+  const st = { mk: mk, stale: null, cleared: false, t: t, tab: 'today', model: null, hist: false, histBusy: false, histRefs: {} };
   if (mk === null) {
     apStoreClear_();
     apShow_(vrError_('url'), st);
