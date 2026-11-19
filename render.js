@@ -4,7 +4,7 @@
 // 関数名・定数名は _ で終える(GAS にそのまま写せる形。グラフは P2 から viewer/ と別の描画)。
 // モデル由来の文字列は必ず vrEsc_ を通す。色は種類の区別だけで、良し悪しでは塗らない。
 
-const VR_VERSION_ = 12;
+const VR_VERSION_ = 13;
 
 // 種類 -> 色のクラス(cls は文字と見出し・k はグラフの濃淡)・アイコン・名前。区分の無い・未知の値は VR_GROUP_OTHER_。
 const VR_GROUPS_ = {
@@ -34,6 +34,8 @@ const VR_TEXT_ = {
   mornings: '朝の記録',
   mornings_hint: '上が睡眠の評価、下が目覚めの答えです。',
   dash: '—',
+  xs: 'エクササイズとその夜・翌朝',
+  xs_next: 'その夜と翌朝',
 };
 const VR_TABS_ = [['today', '今朝'], ['trend', '推移'], ['ask', '質問'], ['past', 'これまで']];
 // 質問する欄の文(docs/plan-20261117-web-ask-3.md 4-1)。waiting の {until} は vrAskMsg_ が差し込む。
@@ -519,10 +521,30 @@ function vrLines_(lines, patterns) {
     + list.map(function (l) { return '<li>' + vrEsc_(l) + '</li>'; }).join('') + '</ul></div>';
 }
 
+// エクササイズとその夜・翌朝のカード(運動 × 状態の計画。2026-11-19)。本体が作った文字列を並べるだけ。
+function vrXs_(x) {
+  if (!x || typeof x !== 'object') return '';
+  const days = vrArr_(x.days);
+  if (days.length === 0) return '';
+  return '<div class="card xs">' + vrHead_(vrGroupInfo_('activity'), VR_TEXT_.xs)
+    + '<p class="hint">' + vrEsc_(x.range) + '</p>'
+    + days.map(function (d) {
+      const o = d && typeof d === 'object' ? d : {};
+      return '<div class="xd"><p class="xdt">' + vrEsc_(o.date) + '</p><ul>'
+        + vrArr_(o.items).map(function (it) {
+          const r = it && typeof it === 'object' ? it : {};
+          return '<li><b>' + vrEsc_(r.when) + '</b>' + vrEsc_(r.text)
+            + (vrStr_(r.zones) !== '' ? '<small>' + vrEsc_(r.zones) + '</small>' : '') + '</li>';
+        }).join('')
+        + '</ul><p class="xn"><b>' + VR_TEXT_.xs_next + '(' + vrEsc_(o.next) + ')</b>' + vrEsc_(o.night) + '<br>' + vrEsc_(o.morning) + '</p></div>';
+    }).join('')
+    + '<p class="hint">' + vrEsc_(x.hint) + '</p><p class="hint">' + vrEsc_(x.stamp) + '</p></div>';
+}
+
 // 推移のタブ: 範囲の切り替えを上に1つ → charts[] を順にすべて並べる → 注記。
 function vrTabTrend_(m) {
   const charts = vrArr_(m.charts).filter(function (c) { return c && typeof c === 'object' && typeof c.id === 'string' && /^[A-Za-z0-9_-]{1,20}$/.test(c.id); });
-  if (charts.length === 0) return vrTrendHead_(m) + '<p class="none">' + VR_TEXT_.none + '</p>' + vrNotes_(m);
+  if (charts.length === 0) return vrTrendHead_(m) + '<p class="none">' + VR_TEXT_.none + '</p>' + vrXs_(m.ex_state) + vrNotes_(m);
   const has90 = charts.some(function (c) { return c.d90 && typeof c.d90 === 'object'; });
   return vrTrendHead_(m) + '<div class="tz"><input class="tin ra" type="radio" name="rg" id="rg7"><input class="tin rb" type="radio" name="rg" id="rg28" checked>'
     + (has90 ? '<input class="tin rc" type="radio" name="rg" id="rg90">' : '')
@@ -532,7 +554,7 @@ function vrTabTrend_(m) {
       return '<div class="chart" id="ch-' + c.id + '"><div class="p7" data-r="d7">' + vrPanel_(c.d7, '') + '</div><div class="p28" data-r="d28">' + vrPanel_(c.d28, '') + '</div>'
         + (has90 ? '<div class="p90" data-r="d90">' + (c.no90 === true ? '<p class="none">' + VR_TEXT_.no90 + '</p>' : vrPanel_(c.d90 && typeof c.d90 === 'object' ? c.d90 : null, '')) + '</div>' : '')
         + vrLines_(c.lines, m.patterns) + '</div>';
-    }).join('') + '</div></div>' + vrNotes_(m);
+    }).join('') + '</div></div>' + vrXs_(m.ex_state) + vrNotes_(m);
 }
 
 // 質問のタブ: 説明(1回だけ)→ 入力欄・写真 → この画面で送ったやり取り → これまでのやり取り(7日。app.js が #ask-hist に差し込む)。

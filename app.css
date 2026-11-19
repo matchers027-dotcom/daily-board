@@ -125,3 +125,11 @@ svg.plot{width:100%;height:auto;display:block;overflow:visible}
 .bz path{fill:none;stroke:var(--sub);stroke-width:1.5}.kz{display:inline-block;width:14px;border-top:2px solid var(--sub);vertical-align:middle;margin-right:5px}
 .mgg{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}.mc{display:flex;flex-direction:column;align-items:center;font-size:11px;line-height:1.5;min-width:0}.mc b{font-weight:600;color:var(--sub)}
 .pls{margin:-8px 4px 18px}.plh{font-size:12px;color:var(--sub);margin:0 0 4px}.pls ul{margin:0;padding-left:1.2em;font-size:13px;line-height:1.6}
+.xs .xd{border-top:.5px solid var(--sep);padding:8px 0 6px}
+.xdt{font-size:13px;font-weight:600;color:var(--sub);margin:0 0 4px}
+.xs ul{margin:0;padding:0;list-style:none}
+.xs li{font-size:14px;line-height:1.55;margin:0 0 4px}
+.xs li b{display:inline-block;min-width:2.6em;font-weight:600;margin-right:6px}
+.xs li small{display:block;font-size:12px;color:var(--sub);padding-left:3em}
+.xn{font-size:13px;line-height:1.6;margin:4px 0 0}
+.xn b{display:block;font-weight:600;color:var(--sub)}
