@@ -119,3 +119,9 @@ svg.plot{width:100%;height:auto;display:block;overflow:visible}
 .hit{fill:transparent;pointer-events:all;cursor:pointer}.hit.on{fill:var(--fill)}
 .rng{list-style:none;margin:8px 0 0;padding:0;font-size:13px;color:var(--text)}.rng li{margin:2px 0}
 .ea{text-anchor:end}
+.tile .sp{display:block;width:100%;height:28px;margin-top:8px}
+.sp .sl{fill:none;stroke:var(--c1);stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}.sp .sd{stroke-width:3.5}
+.sa{fill:none;stroke:var(--avg);stroke-width:1;stroke-dasharray:3 3}.sz{fill:none;stroke:var(--sub);stroke-width:1}.se{fill:var(--c1)}
+.bz path{fill:none;stroke:var(--sub);stroke-width:1.5}.kz{display:inline-block;width:14px;border-top:2px solid var(--sub);vertical-align:middle;margin-right:5px}
+.mgg{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}.mc{display:flex;flex-direction:column;align-items:center;font-size:11px;line-height:1.5;min-width:0}.mc b{font-weight:600;color:var(--sub)}
+.pls{margin:-8px 4px 18px}.plh{font-size:12px;color:var(--sub);margin:0 0 4px}.pls ul{margin:0;padding-left:1.2em;font-size:13px;line-height:1.6}

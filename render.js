@@ -4,7 +4,7 @@
 // 関数名・定数名は _ で終える(GAS にそのまま写せる形。グラフは P2 から viewer/ と別の描画)。
 // モデル由来の文字列は必ず vrEsc_ を通す。色は種類の区別だけで、良し悪しでは塗らない。
 
-const VR_VERSION_ = 11;
+const VR_VERSION_ = 12;
 
 // 種類 -> 色のクラス(cls は文字と見出し・k はグラフの濃淡)・アイコン・名前。区分の無い・未知の値は VR_GROUP_OTHER_。
 const VR_GROUPS_ = {
@@ -30,6 +30,10 @@ const VR_TEXT_ = {
   hist_loading: '読み込んでいます…',
   hist_failed: 'これまでのやり取りを読み込めませんでした。',
   hist_none: 'この7日のやり取りはありません。',
+  no90: 'このグラフは7日と28日だけです。',
+  mornings: '朝の記録',
+  mornings_hint: '上が睡眠の評価、下が目覚めの答えです。',
+  dash: '—',
 };
 const VR_TABS_ = [['today', '今朝'], ['trend', '推移'], ['ask', '質問'], ['past', 'これまで']];
 // 質問する欄の文(docs/plan-20261117-web-ask-3.md 4-1)。waiting の {until} は vrAskMsg_ が差し込む。
@@ -310,7 +314,7 @@ function vrAsk_(latest, ask) {
 }
 
 // 小さな推移(28日の値。null で線を切る)。
-function vrSpark_(sp) {
+function vrSpark_(sp, k) {
   if (!sp || typeof sp !== 'object') return '';
   const vals = vrArr_(sp.vals);
   const n = vals.length;
@@ -325,9 +329,10 @@ function vrSpark_(sp) {
   let d = '';
   let run = [];
   let last = null;
+  const dots = sp.dots === true;
   const flush = function () {
     if (run.length === 1) d += 'M' + run[0].x + ' ' + run[0].y + 'h.1';
-    else if (run.length > 1) d += run.map(function (p, j) { return (j === 0 ? 'M' : 'L') + p.x + ' ' + p.y; }).join('');
+    else if (run.length > 1) d += run.map(function (p, j) { return (j === 0 || dots ? 'M' : 'L') + p.x + ' ' + p.y + (dots ? 'h.1' : ''); }).join('');
     run = [];
   };
   vals.forEach(function (v, i) {
@@ -339,9 +344,11 @@ function vrSpark_(sp) {
   flush();
   if (last === null) return '';
   const avg = vrNum_(sp.avg);
-  return '<svg class="sp" viewBox="0 0 ' + VR_SPARK_W_ + ' ' + VR_SPARK_H_ + '" aria-hidden="true">'
+  const base = vrNum_(sp.base);
+  return '<svg class="sp' + (k ? ' ' + k : '') + '" viewBox="0 0 ' + VR_SPARK_W_ + ' ' + VR_SPARK_H_ + '" aria-hidden="true">'
     + (avg !== null ? '<path class="sa" d="M2 ' + y(avg) + 'H118"/>' : '')
-    + '<path class="sl" d="' + d + '"/><circle class="se" cx="' + last.x + '" cy="' + last.y + '" r="2.5"/></svg>';
+    + (base !== null ? '<path class="sz" d="M2 ' + y(base) + 'H118"/>' : '')
+    + '<path class="' + (dots ? 'sl sd' : 'sl') + '" d="' + d + '"/><circle class="se" cx="' + last.x + '" cy="' + last.y + '" r="2.5"/></svg>';
 }
 
 // グラフの上の1行の文字(エスケープしない生の文字列。HTML にするときは呼び出し側が vrEsc_ を通す)。
@@ -367,6 +374,7 @@ function vrPanel_(chart, tileName) {
       keys.push('<span><b class="' + k + '"></b>' + vrEsc_(chart.legend[i] + v) + '</span>');
     });
   }
+  if (chart.base && typeof chart.base === 'object' && vrStr_(chart.base.text) !== '') keys.push('<span><i class="kz"></i>' + vrEsc_(chart.base.text) + '</span>');
   vrArr_(chart.avgs).forEach(function (a) {
     if (a && typeof a === 'object') keys.push('<span><i class="ka"></i>' + vrEsc_(a.text) + '</span>');
   });
@@ -378,14 +386,15 @@ function vrPanel_(chart, tileName) {
     + vrSvg_(chart) + rng + (keys.length > 0 ? '<div class="keys">' + keys.join('') + '</div>' : '') + '</div>';
 }
 
-// タイル1枚(平たい。グラフと小さな線は出さない)。グラフのある指標(chart が c + 数字)は押すと推移のタブのそのグラフへ。
+// タイル1枚(値・平均・pill の下に28日の小さな線。数字は出さない)。グラフのある指標(chart が c + 数字)は押すと推移のタブのそのグラフへ。
 function vrTile_(f, n) {
   const info = vrGroupInfo_(f.group);
   const band = vrStr_(f.band) !== '' && f.band_usual !== true ? f.band : '';
   const head = '<div class="head ' + info.cls + '">' + vrIcon_(info.icon) + vrEsc_(f.name) + '</div>';
   const body = '<div class="big num">' + vrValueHtml_(f.today) + '</div>'
     + (vrStr_(f.d28) !== '' ? '<div class="avg">平均 ' + vrEsc_(f.d28) + '</div>' : '')
-    + (band !== '' ? '<span class="pill">' + vrEsc_(band) + '</span>' : '');
+    + (band !== '' ? '<span class="pill">' + vrEsc_(band) + '</span>' : '')
+    + vrSpark_(f.spark, info.k);
   if (typeof f.chart === 'string' && /^c[0-9]+$/.test(f.chart)) {
     return '<div class="tile go" role="button" tabindex="0" data-goto="' + vrEsc_(f.chart) + '">' + head + body + '</div>';
   }
@@ -482,18 +491,47 @@ function vrTabToday_(m, noPress) {
   return top + vrCoachGoals_(m, noPress) + vrTiles_(latest);
 }
 
+// 推移のタブの先頭: 朝の記録(睡眠の評価と目覚めの答えのラベルの並び)と、どのグラフにも当たらない今朝の文。
+function vrTrendHead_(m) {
+  const mo = m.mornings && typeof m.mornings === 'object' ? m.mornings : null;
+  const pt = m.patterns && typeof m.patterns === 'object' ? m.patterns : null;
+  const other = pt !== null ? vrArr_(pt.other) : [];
+  if (mo === null && other.length === 0) return '';
+  let out = '<div class="card mg">';
+  if (mo !== null) {
+    out += vrHead_({ cls: 'c-neu', icon: 'i-chart' }, VR_TEXT_.mornings)
+      + '<p class="hint">' + vrEsc_(vrStr_(mo.label) + '・' + VR_TEXT_.mornings_hint) + '</p><div class="mgg">'
+      + vrArr_(mo.items).map(function (it) {
+        const x = it && typeof it === 'object' ? it : {};
+        return '<div class="mc"><b>' + vrEsc_(x.date) + '</b><span>' + vrEsc_(vrStr_(x.verdict) !== '' ? x.verdict : VR_TEXT_.dash)
+          + '</span><span>' + vrEsc_(vrStr_(x.answer) !== '' ? x.answer : VR_TEXT_.dash) + '</span></div>';
+      }).join('') + '</div>';
+  }
+  return out + vrLines_(other, pt) + '</div>';
+}
+
+// その朝のメッセージの推移の文(本体が逐語で渡す。ここでは並べるだけ)。
+function vrLines_(lines, patterns) {
+  const list = vrArr_(lines).filter(function (l) { return typeof l === 'string' && l !== ''; });
+  if (list.length === 0) return '';
+  const label = patterns && typeof patterns === 'object' ? vrStr_(patterns.label) : '';
+  return '<div class="pls">' + (label !== '' ? '<p class="plh">' + vrEsc_(label) + '</p>' : '') + '<ul>'
+    + list.map(function (l) { return '<li>' + vrEsc_(l) + '</li>'; }).join('') + '</ul></div>';
+}
+
 // 推移のタブ: 範囲の切り替えを上に1つ → charts[] を順にすべて並べる → 注記。
 function vrTabTrend_(m) {
   const charts = vrArr_(m.charts).filter(function (c) { return c && typeof c === 'object' && typeof c.id === 'string' && /^[A-Za-z0-9_-]{1,20}$/.test(c.id); });
-  if (charts.length === 0) return '<p class="none">' + VR_TEXT_.none + '</p>' + vrNotes_(m);
+  if (charts.length === 0) return vrTrendHead_(m) + '<p class="none">' + VR_TEXT_.none + '</p>' + vrNotes_(m);
   const has90 = charts.some(function (c) { return c.d90 && typeof c.d90 === 'object'; });
-  return '<div class="tz"><input class="tin ra" type="radio" name="rg" id="rg7"><input class="tin rb" type="radio" name="rg" id="rg28" checked>'
+  return vrTrendHead_(m) + '<div class="tz"><input class="tin ra" type="radio" name="rg" id="rg7"><input class="tin rb" type="radio" name="rg" id="rg28" checked>'
     + (has90 ? '<input class="tin rc" type="radio" name="rg" id="rg90">' : '')
     + '<div class="range"><label class="la" for="rg7">7日</label><label class="lb" for="rg28">28日</label>'
     + (has90 ? '<label class="lc" for="rg90">90日</label>' : '') + '</div><div class="charts">'
     + charts.map(function (c) {
       return '<div class="chart" id="ch-' + c.id + '"><div class="p7" data-r="d7">' + vrPanel_(c.d7, '') + '</div><div class="p28" data-r="d28">' + vrPanel_(c.d28, '') + '</div>'
-        + (has90 ? '<div class="p90" data-r="d90">' + vrPanel_(c.d90 && typeof c.d90 === 'object' ? c.d90 : null, '') + '</div>' : '') + '</div>';
+        + (has90 ? '<div class="p90" data-r="d90">' + (c.no90 === true ? '<p class="none">' + VR_TEXT_.no90 + '</p>' : vrPanel_(c.d90 && typeof c.d90 === 'object' ? c.d90 : null, '')) + '</div>' : '')
+        + vrLines_(c.lines, m.patterns) + '</div>';
     }).join('') + '</div></div>' + vrNotes_(m);
 }
 
@@ -634,7 +672,7 @@ function vrSvg_(chart) {
   if (points.length > 0) {
     const last = lastOf(points);
     const sorted = points.slice().sort(function (a, b) { return a.i - b.i; });
-    if (n > 7) {
+    if (n > 7 && c.dots !== true) {
       // 8日以上は線(i が連続する点だけをつなぎ、null の日で切る。1点だけの区間は h.1)
       let d = '';
       let run = [];
@@ -681,6 +719,12 @@ function vrSvg_(chart) {
   const shorts = avs.filter(function (a) { return typeof a.short === 'string' && a.short !== ''; });
   if (shorts.length > 0) {
     out += '<g class="al">' + shorts.map(function (a) { return '<text x="' + (right - 2) + '" y="' + (Y(a.v) - 4) + '">' + vrEsc_(a.short) + '</text>'; }).join('') + '</g>';
+  }
+
+  const bz = c.base && typeof c.base === 'object' && vrNum_(c.base.v) !== null ? c.base : null;
+  if (bz !== null) {
+    out += '<g class="bz"><path d="M' + L + ' ' + Y(bz.v) + 'H' + right + '"/></g>';
+    if (typeof bz.short === 'string' && bz.short !== '') out += '<g class="al"><text x="' + (right - 2) + '" y="' + (Y(bz.v) - 4) + '">' + vrEsc_(bz.short) + '</text></g>';
   }
 
   const rg = c.range && typeof c.range === 'object' ? c.range : null;
